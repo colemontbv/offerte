@@ -60,14 +60,19 @@
     .search-wrap input:focus { border-color: var(--primary); }
     .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 14px; pointer-events: none; }
 
-    /* ── Categorie filter (2 lagen) ── */
+    /* ── Categorie filter (multi-level) ── */
     .cat-filters { margin-bottom: 20px; }
     .cat-row {
       display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
-      padding: 6px 0;
+      padding: 8px 0;
     }
     .cat-row + .cat-row {
-      border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px;
+      border-top: 1px solid var(--border); padding-top: 10px;
+    }
+    .cat-row-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: var(--text-muted); margin-right: 4px;
+      white-space: nowrap;
     }
     .cat-btn {
       padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 600;
@@ -76,7 +81,7 @@
     }
     .cat-btn:hover { border-color: var(--primary); color: var(--primary); }
     .cat-btn.active { background: var(--moss); border-color: var(--moss); color: #fff; }
-    .cat-btn.parent-active { background: var(--moss-light); border-color: var(--primary); color: var(--primary); }
+    .cat-btn.in-path { background: var(--moss-light); border-color: var(--primary); color: var(--primary); }
 
     /* ── Product grid ── */
     .product-grid {
@@ -223,11 +228,10 @@
   <script>
     let allProducts   = [];
     let cart          = JSON.parse(sessionStorage.getItem('offerte_cart') || '{}');
-    let activeCatId   = null;   // null = alle; number = gefilterd op cat
-    let activeParent  = null;   // null = geen parent geselecteerd
     let imageCache    = {};
     let allCategories = [];
     let catMap        = {};     // id -> category object
+    let catPath       = [];     // geselecteerd pad: [rootId, childId, grandchildId, ...]
 
     // ── Laden ─────────────────────────────────────────────────────────
     async function loadProducts() {
@@ -248,77 +252,104 @@
       }
     }
 
-    function buildCatFilter() {
+    // Alle category-IDs die relevant zijn (op producten staan + hun ancestors)
+    function getRelevantIds() {
       const usedIds = new Set(allProducts.flatMap(p => (p.web_categories||[]).map(c => c.id)));
-
-      // Bepaal parents: categorie waarvan parent_id niet in onze lijst zit (of false)
-      const isRoot = c => !c.parent_id || !catMap[c.parent_id[0]];
-
-      // Voeg ook parent-IDs toe van gebruikte categorieën (ook al staan die parents niet op producten)
-      const referencedParentIds = new Set(
-        allCategories
-          .filter(c => usedIds.has(c.id) && c.parent_id && catMap[c.parent_id[0]])
-          .map(c => c.parent_id[0])
-      );
-      // Root-categorieën = usedIds + referencedParentIds die zelf root zijn
-      const parents = allCategories
-        .filter(c => (usedIds.has(c.id) || referencedParentIds.has(c.id)) && isRoot(c))
-        .sort((a,b) => a.name.localeCompare(b.name));
-      // Kinderen van een parent
-      const childrenOf = pid => allCategories
-        .filter(c => usedIds.has(c.id) && c.parent_id && c.parent_id[0] === pid)
-        .sort((a,b) => a.name.localeCompare(b.name));
-
-      const wrap = document.getElementById('cat-filters');
-
-      // Rij 1: Alle + parents
-      const parentBtns = parents.map(c => {
-        const kids = childrenOf(c.id);
-        const isActive = activeParent === c.id;
-        return `<button class="cat-btn${isActive ? ' parent-active' : ''}" id="pbtn-${c.id}"
-                  onclick="selectParent(${c.id})">${escHtml(c.name)}${kids.length ? ' ›' : ''}</button>`;
-      }).join('');
-
-      // Rij 2: kinderen van geselecteerde parent (als die kinderen heeft)
-      let childRow = '';
-      if (activeParent !== null) {
-        const kids = childrenOf(activeParent);
-        if (kids.length) {
-          const allKidsBtn = `<button class="cat-btn${activeCatId === null ? ' active' : ''}"
-                                onclick="setActiveCat(null)">Alle ${escHtml(catMap[activeParent]?.name||'')}</button>`;
-          const kidBtns = kids.map(c =>
-            `<button class="cat-btn${activeCatId === c.id ? ' active' : ''}"
-               onclick="setActiveCat(${c.id})">${escHtml(c.name)}</button>`
-          ).join('');
-          childRow = `<div class="cat-row">${allKidsBtn}${kidBtns}</div>`;
+      const relevant = new Set(usedIds);
+      usedIds.forEach(id => {
+        let c = catMap[id];
+        while (c && c.parent_id) {
+          relevant.add(c.parent_id[0]);
+          c = catMap[c.parent_id[0]];
         }
-      }
-
-      wrap.innerHTML =
-        `<div class="cat-row">
-           <button class="cat-btn${activeParent === null && activeCatId === null ? ' active' : ''}"
-                   onclick="selectParent(null)">Alle</button>
-           ${parentBtns}
-         </div>${childRow}`;
+      });
+      return relevant;
     }
 
-    function selectParent(pid) {
-      activeParent = pid;
-      activeCatId  = null;
-      // Als de parent geen kinderen heeft, filter direct op die parent-categorie
-      if (pid !== null) {
-        const kids = allCategories.filter(c =>
-          c.parent_id && c.parent_id[0] === pid &&
-          new Set(allProducts.flatMap(p => (p.web_categories||[]).map(x => x.id))).has(c.id)
-        );
-        if (!kids.length) activeCatId = pid;
+    // Directe kinderen van parentId die relevant zijn
+    function childrenOf(parentId, relevant) {
+      return allCategories
+        .filter(c => relevant.has(c.id) && c.parent_id && c.parent_id[0] === parentId)
+        .sort((a, b) => a.name.localeCompare('nl'));
+    }
+
+    // Alle descendant-IDs inclusief zichzelf
+    function descendantsOf(catId) {
+      const result = new Set([catId]);
+      allCategories.filter(c => c.parent_id && c.parent_id[0] === catId)
+        .forEach(child => descendantsOf(child.id).forEach(id => result.add(id)));
+      return result;
+    }
+
+    function buildCatFilter() {
+      const relevant = getRelevantIds();
+      const wrap = document.getElementById('cat-filters');
+      let html = '';
+
+      // Rij 0: root-categorieën (geen parent of parent niet in catMap)
+      const roots = allCategories
+        .filter(c => relevant.has(c.id) && (!c.parent_id || !catMap[c.parent_id[0]]))
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl'));
+
+      const row0SelectedId = catPath[0] ?? null;
+      const allActive = catPath.length === 0;
+      const rootBtns = roots.map(c => {
+        const isInPath = catPath[0] === c.id;
+        const kids = childrenOf(c.id, relevant);
+        return `<button class="cat-btn${isInPath ? (catPath.length === 1 && !childrenOf(c.id, relevant).length ? ' active' : ' in-path') : ''}"
+                        onclick="selectAtDepth(0, ${c.id})">
+                  ${escHtml(c.name)}${kids.length ? ' ›' : ''}
+                </button>`;
+      }).join('');
+      html += `<div class="cat-row">
+        <button class="cat-btn${allActive ? ' active' : ''}" onclick="clearPath()">Alle</button>
+        ${rootBtns}
+      </div>`;
+
+      // Volgende rijen: één per niveau in het pad
+      for (let depth = 0; depth < catPath.length; depth++) {
+        const parentId = catPath[depth];
+        const kids = childrenOf(parentId, relevant);
+        if (!kids.length) break;
+
+        const parentName = catMap[parentId]?.name || '';
+        const selectedAtNext = catPath[depth + 1] ?? null;
+        const allThisActive = selectedAtNext === null;
+
+        const kidBtns = kids.map(c => {
+          const isInPath = catPath[depth + 1] === c.id;
+          const grandkids = childrenOf(c.id, relevant);
+          return `<button class="cat-btn${isInPath ? (catPath.length === depth+2 && !grandkids.length ? ' active' : ' in-path') : ''}"
+                          onclick="selectAtDepth(${depth + 1}, ${c.id})">
+                    ${escHtml(c.name)}${grandkids.length ? ' ›' : ''}
+                  </button>`;
+        }).join('');
+
+        html += `<div class="cat-row">
+          <span class="cat-row-label">${escHtml(parentName)}:</span>
+          <button class="cat-btn${allThisActive ? ' active' : ''}"
+                  onclick="clearPathFrom(${depth + 1})">Alle ${escHtml(parentName)}</button>
+          ${kidBtns}
+        </div>`;
       }
+
+      wrap.innerHTML = html;
+    }
+
+    function selectAtDepth(depth, catId) {
+      catPath = catPath.slice(0, depth).concat([catId]);
       buildCatFilter();
       renderGrid();
     }
 
-    function setActiveCat(cid) {
-      activeCatId = cid;
+    function clearPath() {
+      catPath = [];
+      buildCatFilter();
+      renderGrid();
+    }
+
+    function clearPathFrom(depth) {
+      catPath = catPath.slice(0, depth);
       buildCatFilter();
       renderGrid();
     }
@@ -328,16 +359,11 @@
     function renderGrid() {
       const q = document.getElementById('search-input').value.toLowerCase();
       let list = allProducts;
-      // Filter op actieve categorie (kind of parent zonder kinderen)
-      if (activeCatId !== null) {
-        list = list.filter(p => (p.web_categories||[]).some(c => c.id === activeCatId));
-      } else if (activeParent !== null) {
-        // Filter op alle producten die een kind-categorie van de parent hebben
-        const kidIds = new Set(allCategories
-          .filter(c => c.parent_id && c.parent_id[0] === activeParent)
-          .map(c => c.id));
-        kidIds.add(activeParent);
-        list = list.filter(p => (p.web_categories||[]).some(c => kidIds.has(c.id)));
+      // Filter op diepste geselecteerde categorie inclusief al haar nakomelingen
+      if (catPath.length > 0) {
+        const deepest = catPath[catPath.length - 1];
+        const filterIds = descendantsOf(deepest);
+        list = list.filter(p => (p.web_categories||[]).some(c => filterIds.has(c.id)));
       }
       if (q) list = list.filter(p => (p.name||'').toLowerCase().includes(q)
                                   || (p.default_code||'').toLowerCase().includes(q));

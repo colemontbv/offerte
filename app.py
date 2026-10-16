@@ -140,7 +140,7 @@ def api_products():
     else:
         debug.append(f'pricelist: {pricelist_id} (cached)')
 
-    ctx = {'pricelist': pricelist_id} if pricelist_id else {}
+    ctx = {'pricelist': pricelist_id, 'lang': 'nl_BE'} if pricelist_id else {'lang': 'nl_BE'}
 
     # Haal producten op (inclusief variant-telling)
     try:
@@ -264,11 +264,9 @@ def product_variants(tmpl_id):
         # Gebruik gecachede pricelist uit sessie
         pricelist_id = session.get('pricelist_id') or None
 
-        vctx = {'pricelist': pricelist_id} if pricelist_id else {}
+        vctx = {'pricelist': pricelist_id, 'lang': 'nl_BE'} if pricelist_id else {'lang': 'nl_BE'}
         vkw = {'fields': ['id', 'display_name', 'lst_price', 'default_code'],
-               'limit': 100}
-        if vctx:
-            vkw['context'] = vctx
+               'context': vctx, 'limit': 100}
         var_resp = odoo_rpc(cookies, 'product.product', 'search_read',
                             [[['product_tmpl_id', '=', tmpl_id], ['active', '=', True]]],
                             vkw)
