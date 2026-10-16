@@ -121,7 +121,7 @@ def api_products():
                         [[['is_published', '=', True],
                           ['sale_ok', '=', True]]],
                         {'fields': ['id', 'name', 'description_sale', 'list_price',
-                                    'website_price', 'categ_id', 'uom_id', 'default_code'],
+                                    'lst_price', 'categ_id', 'uom_id', 'default_code'],
                          'order': 'categ_id asc, name asc',
                          'limit': 1000})
         result = resp.json().get('result', [])

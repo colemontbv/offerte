@@ -215,7 +215,7 @@
     function buildCard(p) {
       const inCart = !!cart[p.id];
       const qty    = cart[p.id]?.qty || 1;
-      const rawPrice = (p.website_price && p.website_price > 0) ? p.website_price : p.list_price;
+      const rawPrice = (p.lst_price && p.lst_price > 0) ? p.lst_price : p.list_price;
       const price  = formatEuro(rawPrice);
       const uom    = p.uom_id ? p.uom_id[1] : '';
       const ref    = p.default_code ? `<div class="prod-ref">${escHtml(p.default_code)}</div>` : '';
@@ -283,7 +283,7 @@
       const p   = allProducts.find(x => x.id === id);
       if (!p) return;
       const qty = parseInt(document.getElementById(`qty-${id}`)?.value) || 1;
-      const cartPrice = (p.website_price && p.website_price > 0) ? p.website_price : p.list_price;
+      const cartPrice = (p.lst_price && p.lst_price > 0) ? p.lst_price : p.list_price;
       cart[id]  = { id, name: p.name, price: cartPrice, qty, uom: p.uom_id?.[1]||'', ref: p.default_code||'' };
       saveCart();
       updateCartBadge();
