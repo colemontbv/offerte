@@ -116,44 +116,71 @@ def api_products():
     if not session.get('odoo_session'):
         return jsonify({'error': 'Niet ingelogd'}), 401
     cookies = {'session_id': session['odoo_session']}
+    debug = []
+
+    # Zoek Default pricelist (kan falen voor portaalgebruikers — geen blocker)
+    pricelist_id = None
     try:
-        # Zoek Default pricelist op voor correcte prijzen
         pl_resp = odoo_rpc(cookies, 'product.pricelist', 'search_read',
                            [[['name', 'ilike', 'Default']]],
                            {'fields': ['id', 'name'], 'limit': 1})
-        pricelists = pl_resp.json().get('result', [])
-        pricelist_id = pricelists[0]['id'] if pricelists else None
-        ctx = {'pricelist': pricelist_id} if pricelist_id else {}
+        pl_data = pl_resp.json()
+        pricelists = pl_data.get('result', [])
+        if pricelists:
+            pricelist_id = pricelists[0]['id']
+            debug.append(f'pricelist: {pricelist_id} ({pricelists[0]["name"]})')
+        else:
+            debug.append(f'pricelist: not found — {pl_data.get("error", {}).get("message","?")}')
+    except Exception as e:
+        debug.append(f'pricelist error: {e}')
 
-        # Haal webcategorieën op
+    ctx = {'pricelist': pricelist_id} if pricelist_id else {}
+
+    # Haal webcategorieën op (kan falen — geen blocker)
+    cats = {}
+    try:
         cat_resp = odoo_rpc(cookies, 'product.public.category', 'search_read',
                             [[]],
                             {'fields': ['id', 'name', 'complete_name'], 'limit': 500})
-        cats = {c['id']: c for c in cat_resp.json().get('result', [])}
-
-        # Haal producten op met pricelist context
-        resp = odoo_rpc(cookies, 'product.template', 'search_read',
-                        [[['is_published', '=', True],
-                          ['sale_ok', '=', True]]],
-                        {'fields': ['id', 'name', 'description_sale', 'lst_price',
-                                    'public_categ_ids', 'uom_id', 'default_code'],
-                         'context': ctx,
-                         'order': 'name asc',
-                         'limit': 1000})
-        products = resp.json().get('result', [])
-
-        # Koppel categorienamen aan elk product
-        for p in products:
-            p['web_categories'] = [
-                {'id': cid, 'name': cats[cid]['name'],
-                 'complete_name': cats[cid].get('complete_name', cats[cid]['name'])}
-                for cid in p.get('public_categ_ids', []) if cid in cats
-            ]
-
-        return jsonify({'products': products,
-                        'categories': sorted(cats.values(), key=lambda c: c.get('complete_name',''))})
+        cat_data = cat_resp.json()
+        cats = {c['id']: c for c in cat_data.get('result', [])}
+        debug.append(f'categories: {len(cats)}')
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        debug.append(f'categories error: {e}')
+
+    # Haal producten op
+    try:
+        kwargs = {'fields': ['id', 'name', 'description_sale', 'list_price',
+                              'public_categ_ids', 'uom_id', 'default_code'],
+                  'order': 'name asc',
+                  'limit': 1000}
+        if ctx:
+            kwargs['context'] = ctx
+        resp = odoo_rpc(cookies, 'product.template', 'search_read',
+                        [[['is_published', '=', True], ['sale_ok', '=', True]]],
+                        kwargs)
+        resp_data = resp.json()
+        products = resp_data.get('result', [])
+        if not products and resp_data.get('error'):
+            debug.append(f'products error: {resp_data["error"].get("message","?")}')
+            return jsonify({'error': resp_data['error'].get('message','Odoo fout'),
+                            'debug': debug}), 500
+        debug.append(f'products: {len(products)}')
+    except Exception as e:
+        debug.append(f'products exception: {e}')
+        return jsonify({'error': str(e), 'debug': debug}), 500
+
+    # Koppel categorienamen
+    for p in products:
+        p['web_categories'] = [
+            {'id': cid, 'name': cats[cid]['name'],
+             'complete_name': cats[cid].get('complete_name', cats[cid]['name'])}
+            for cid in p.get('public_categ_ids', []) if cid in cats
+        ]
+
+    return jsonify({'products': products,
+                    'categories': sorted(cats.values(), key=lambda c: c.get('complete_name', '')),
+                    'debug': debug})
 
 
 @app.route('/api/product/<int:tmpl_id>/image')
