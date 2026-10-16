@@ -134,7 +134,7 @@ def api_products():
     except Exception as e:
         debug.append(f'pricelist error: {e}')
 
-    ctx = {'pricelist': pricelist_id, 'lang': 'nl_BE'} if pricelist_id else {'lang': 'nl_BE'}
+    ctx = {'pricelist': pricelist_id} if pricelist_id else {}
 
     # Haal producten op (inclusief variant-telling)
     try:
@@ -142,17 +142,18 @@ def api_products():
                               'public_categ_ids', 'uom_id', 'default_code',
                               'product_variant_count'],
                   'order': 'name asc',
-                  'limit': 1000,
-                  'context': ctx}
+                  'limit': 1000}
+        if ctx:
+            kwargs['context'] = ctx
         resp = odoo_rpc(cookies, 'product.template', 'search_read',
                         [[['is_published', '=', True], ['sale_ok', '=', True]]],
                         kwargs)
         resp_data = resp.json()
-        products = resp_data.get('result', [])
-        if not products and resp_data.get('error'):
-            debug.append(f'products error: {resp_data["error"].get("message","?")}')
-            return jsonify({'error': resp_data['error'].get('message','Odoo fout'),
-                            'debug': debug}), 500
+        if resp_data.get('error'):
+            msg = resp_data['error'].get('data', {}).get('message') or resp_data['error'].get('message', 'Odoo fout')
+            debug.append(f'products error: {msg}')
+            return jsonify({'error': msg, 'debug': debug}), 500
+        products = resp_data.get('result') or []
         debug.append(f'products: {len(products)}')
     except Exception as e:
         debug.append(f'products exception: {e}')
@@ -182,14 +183,16 @@ def api_products():
 
     # Bereken minimumprijs voor producten met varianten
     variant_min = {}  # tmpl_id -> min variant price
-    variant_tmpl_ids = [p['id'] for p in products if (p.get('product_variant_count') or 0) > 1]
-    if variant_tmpl_ids:
-        try:
+    try:
+        variant_tmpl_ids = [p['id'] for p in products if (p.get('product_variant_count') or 0) > 1]
+        if variant_tmpl_ids:
+            vkwargs = {'fields': ['id', 'product_tmpl_id', 'lst_price'], 'limit': 5000}
+            if ctx:
+                vkwargs['context'] = ctx
             vr = odoo_rpc(cookies, 'product.product', 'search_read',
                           [[['product_tmpl_id', 'in', variant_tmpl_ids], ['active', '=', True]]],
-                          {'fields': ['id', 'product_tmpl_id', 'lst_price'],
-                           'context': ctx, 'limit': 5000})
-            for v in vr.json().get('result', []) or []:
+                          vkwargs)
+            for v in (vr.json().get('result') or []):
                 tid = v['product_tmpl_id'][0] if v.get('product_tmpl_id') else None
                 if not tid:
                     continue
@@ -197,8 +200,8 @@ def api_products():
                 if vp > 0 and (tid not in variant_min or vp < variant_min[tid]):
                     variant_min[tid] = vp
             debug.append(f'variant min prices: {len(variant_min)}')
-        except Exception as e:
-            debug.append(f'variant min error: {e}')
+    except Exception as e:
+        debug.append(f'variant min error: {e}')
 
     # Voeg display_price en price_prefix toe aan elk product
     for p in products:
@@ -257,20 +260,24 @@ def product_variants(tmpl_id):
         pl_resp = odoo_rpc(cookies, 'product.pricelist', 'search_read',
                            [[['name', 'ilike', 'Default']]],
                            {'fields': ['id'], 'limit': 1})
-        pl_data = pl_resp.json().get('result', [])
+        pl_data = pl_resp.json().get('result') or []
         if pl_data:
             pricelist_id = pl_data[0]['id']
 
         # Haal varianten op
-        kwargs = {'fields': ['id', 'display_name', 'lst_price',
-                             'product_template_attribute_value_ids', 'default_code'],
-                  'limit': 100}
-        if pricelist_id:
-            kwargs['context'] = {'pricelist': pricelist_id}
+        vctx = {'pricelist': pricelist_id} if pricelist_id else {}
+        vkw = {'fields': ['id', 'display_name', 'lst_price',
+                          'product_template_attribute_value_ids', 'default_code'],
+               'limit': 100}
+        if vctx:
+            vkw['context'] = vctx
         var_resp = odoo_rpc(cookies, 'product.product', 'search_read',
                             [[['product_tmpl_id', '=', tmpl_id], ['active', '=', True]]],
-                            kwargs)
-        variants = var_resp.json().get('result', []) or []
+                            vkw)
+        resp_data = var_resp.json()
+        if resp_data.get('error'):
+            return jsonify({'error': resp_data['error'].get('message', 'Odoo fout')}), 500
+        variants = resp_data.get('result') or []
 
         # Haal pricelist variant-items op voor eventuele fixed prices
         price_map = {}
