@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Offerte — {{ company_name }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --moss: #2d4a2d; --moss-light: #edf2ed; --primary: #3b6e3b;
+      --text: #1a1a1a; --text-muted: #6b7280;
+      --border: #e5e7eb; --surface: #fff;
+      --error: #c0392b; --error-bg: #fdf2f2;
+      --radius: 12px;
+    }
+    body {
+      font-family: 'Inter', sans-serif; background: #f5f0e8;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: var(--surface); border-radius: var(--radius);
+      box-shadow: 0 4px 24px rgba(0,0,0,.1);
+      width: 100%; max-width: 420px; padding: 40px;
+    }
+    .logo { text-align: center; margin-bottom: 32px; }
+    .logo-mark {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 56px; height: 56px; background: var(--moss); border-radius: 14px;
+      font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 12px;
+    }
+    .logo h1 { font-size: 20px; font-weight: 700; color: var(--moss); }
+    .logo p  { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+    label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    input {
+      width: 100%; padding: 10px 14px; border: 1.5px solid var(--border);
+      border-radius: 8px; font-size: 14px; font-family: inherit;
+      transition: border-color .15s; outline: none;
+    }
+    input:focus { border-color: var(--primary); }
+    .field { margin-bottom: 16px; }
+    .btn {
+      width: 100%; padding: 11px; background: var(--moss); color: #fff;
+      border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
+      cursor: pointer; transition: background .15s; margin-top: 8px;
+    }
+    .btn:hover { background: var(--primary); }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+    .error {
+      background: var(--error-bg); color: var(--error); border-radius: 8px;
+      padding: 10px 14px; font-size: 13px; margin-top: 12px; display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <div class="logo-mark">{{ company_name[0] }}</div>
+      <h1>{{ company_name }}</h1>
+      <p>Klantportaal — Offertes</p>
+    </div>
+    <div class="field">
+      <label for="login">E-mailadres</label>
+      <input type="email" id="login" placeholder="uw@emailadres.be" autocomplete="username">
+    </div>
+    <div class="field">
+      <label for="password">Wachtwoord</label>
+      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn" id="btn-login" onclick="doLogin()">Inloggen</button>
+    <div class="error" id="error-msg"></div>
+  </div>
+
+  <script>
+    document.getElementById('password').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
+    });
+
+    async function doLogin() {
+      const login    = document.getElementById('login').value.trim();
+      const password = document.getElementById('password').value;
+      const btn      = document.getElementById('btn-login');
+      const errEl    = document.getElementById('error-msg');
+      errEl.style.display = 'none';
+      if (!login || !password) { showErr('Vul e-mailadres en wachtwoord in.'); return; }
+      btn.disabled = true; btn.textContent = 'Bezig…';
+      try {
+        const r = await fetch('/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({login, password})
+        });
+        const d = await r.json();
+        if (d.success) {
+          window.location.href = '/catalog';
+        } else {
+          showErr(d.error || 'Inloggen mislukt.');
+        }
+      } catch (e) {
+        showErr('Verbindingsfout. Probeer opnieuw.');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Inloggen';
+      }
+    }
+
+    function showErr(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = msg; el.style.display = 'block';
+    }
+  </script>
+</body>
+</html>

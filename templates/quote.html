@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Offerte — {{ company_name }}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --moss: #2d4a2d; --moss-light: #edf2ed; --primary: #3b6e3b;
+      --text: #1a1a1a; --text-muted: #6b7280;
+      --border: #e5e7eb; --surface: #fff; --bg: #f5f0e8;
+      --radius: 10px;
+    }
+
+    /* ── Screen-only (toolbar) ─────────────────────────────────── */
+    @media screen {
+      body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
+      .toolbar {
+        background: var(--moss); color: #fff;
+        padding: 0 24px; height: 56px;
+        display: flex; align-items: center; justify-content: space-between;
+        position: sticky; top: 0; z-index: 100;
+      }
+      .tb-left { font-weight: 700; font-size: 15px; }
+      .tb-right { display: flex; gap: 10px; }
+      .btn-tb {
+        padding: 7px 18px; border-radius: 7px; font-size: 13px; font-weight: 600;
+        cursor: pointer; border: 1.5px solid rgba(255,255,255,.4);
+        background: transparent; color: #fff; transition: background .15s;
+      }
+      .btn-tb:hover { background: rgba(255,255,255,.15); }
+      .btn-print { background: #fff; color: var(--moss); border-color: #fff; }
+      .btn-print:hover { background: #f0f0f0; }
+
+      .page-wrap { max-width: 860px; margin: 32px auto 60px; padding: 0 20px; }
+      .quote-paper {
+        background: #fff; border-radius: 12px;
+        box-shadow: 0 4px 24px rgba(0,0,0,.1);
+        padding: 48px 52px;
+      }
+      .no-items-msg {
+        text-align: center; padding: 80px 20px;
+        color: var(--text-muted); font-size: 15px;
+      }
+      .no-items-msg a { color: var(--primary); text-decoration: underline; cursor: pointer; }
+    }
+
+    /* ── Print ─────────────────────────────────────────────────── */
+    @media print {
+      body { font-family: 'Inter', Arial, sans-serif; background: #fff; color: #000; font-size: 11pt; }
+      .toolbar, .no-print { display: none !important; }
+      .page-wrap { margin: 0; padding: 0; max-width: 100%; }
+      .quote-paper { box-shadow: none; border-radius: 0; padding: 0; }
+      @page { margin: 18mm 18mm 18mm 18mm; size: A4; }
+      table { page-break-inside: auto; }
+      tr    { page-break-inside: avoid; }
+    }
+
+    /* ── Quote layout (screen + print) ─────────────────────────── */
+    .q-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
+    .q-company h2 { font-size: 22px; font-weight: 800; color: var(--moss); }
+    .q-company p  { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.6; }
+    .q-meta { text-align: right; }
+    .q-title { font-size: 26px; font-weight: 800; color: var(--moss); margin-bottom: 4px; }
+    .q-meta p { font-size: 12px; color: var(--text-muted); line-height: 1.7; }
+    .q-meta .q-num { font-size: 14px; font-weight: 700; color: var(--text); }
+
+    .q-addresses { display: flex; gap: 32px; margin-bottom: 36px; }
+    .q-addr { flex: 1; }
+    .q-addr-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--text-muted); margin-bottom: 6px; }
+    .q-addr p { font-size: 12px; line-height: 1.7; color: var(--text); }
+
+    /* ── Lines table ─────────────────────────────────────────────── */
+    table.q-lines {
+      width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 12px;
+    }
+    table.q-lines thead tr { background: var(--moss); color: #fff; }
+    table.q-lines thead th {
+      padding: 10px 12px; text-align: left; font-size: 11px;
+      font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+    }
+    table.q-lines thead th:last-child,
+    table.q-lines thead th:nth-last-child(2),
+    table.q-lines thead th:nth-last-child(3) { text-align: right; }
+    table.q-lines tbody tr { border-bottom: 1px solid var(--border); }
+    table.q-lines tbody tr:last-child { border-bottom: none; }
+    table.q-lines tbody td { padding: 10px 12px; vertical-align: top; }
+    table.q-lines tbody td:last-child,
+    table.q-lines tbody td:nth-last-child(2),
+    table.q-lines tbody td:nth-last-child(3) { text-align: right; }
+    table.q-lines tbody tr:nth-child(even) { background: #fafaf8; }
+    .td-name { font-weight: 600; }
+    .td-ref  { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Totals ──────────────────────────────────────────────────── */
+    .q-totals { display: flex; justify-content: flex-end; margin-bottom: 36px; }
+    .q-totals-inner { min-width: 280px; }
+    .tot-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
+    .tot-row.subtotal { border-top: 1px solid var(--border); padding-top: 10px; }
+    .tot-row.grand { border-top: 2px solid var(--moss); padding-top: 10px; font-weight: 800; font-size: 15px; color: var(--moss); }
+    .tot-label { color: var(--text-muted); }
+    .tot-val   { font-weight: 600; }
+
+    /* ── Footer note ─────────────────────────────────────────────── */
+    .q-note {
+      border-top: 1px solid var(--border); padding-top: 20px;
+      font-size: 11px; color: var(--text-muted); line-height: 1.6;
+    }
+    .q-note strong { color: var(--text); }
+
+    /* ── Editable fields (screen only) ──────────────────────────── */
+    @media screen {
+      .edit-field {
+        border: none; border-bottom: 1px dashed var(--border);
+        outline: none; font-family: inherit; background: transparent;
+        width: 100%; font-size: 12px; color: var(--text); padding: 1px 0;
+      }
+      .edit-field:focus { border-bottom-color: var(--primary); }
+      textarea.edit-field { resize: vertical; min-height: 40px; }
+    }
+    @media print {
+      .edit-field { border: none; background: transparent; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar no-print">
+    <span class="tb-left">{{ company_name }} — Offerte bekijken</span>
+    <div class="tb-right">
+      <button class="btn-tb" onclick="history.back()">← Terug naar catalogus</button>
+      <button class="btn-tb btn-print" onclick="window.print()">🖨 Afdrukken / PDF opslaan</button>
+    </div>
+  </div>
+
+  <div class="page-wrap">
+    <div class="quote-paper" id="quote-paper">
+      <div class="no-items-msg" id="no-items" style="display:none">
+        Geen producten in offerte.
+        <br><br><a onclick="history.back()">← Terug naar catalogus</a>
+      </div>
+      <div id="quote-content" style="display:none">
+
+        <!-- Header -->
+        <div class="q-header">
+          <div class="q-company">
+            <h2>{{ company_name }}</h2>
+            <p id="company-info"></p>
+          </div>
+          <div class="q-meta">
+            <div class="q-title">Offerte</div>
+            <p>
+              <span class="q-num" id="q-number">—</span><br>
+              Datum: <span id="q-date"></span><br>
+              Geldig tot: <span id="q-valid"></span>
+            </p>
+          </div>
+        </div>
+
+        <!-- Adressen -->
+        <div class="q-addresses">
+          <div class="q-addr">
+            <div class="q-addr-label">Verkoper</div>
+            <p id="seller-addr"></p>
+          </div>
+          <div class="q-addr">
+            <div class="q-addr-label">Klant</div>
+            <p id="buyer-addr"></p>
+          </div>
+          <div class="q-addr no-print" style="flex:0 0 auto">
+            <div class="q-addr-label">Referentie klant</div>
+            <input class="edit-field" id="q-ref" placeholder="Uw referentie…" style="width:180px">
+          </div>
+        </div>
+
+        <!-- Tabel -->
+        <table class="q-lines">
+          <thead>
+            <tr>
+              <th style="width:40px">#</th>
+              <th>Product</th>
+              <th style="width:60px">Eenheid</th>
+              <th style="width:70px">Aantal</th>
+              <th style="width:100px">Eenheidsprijs</th>
+              <th style="width:110px">Totaal excl.</th>
+            </tr>
+          </thead>
+          <tbody id="q-lines-body"></tbody>
+        </table>
+
+        <!-- Totalen -->
+        <div class="q-totals">
+          <div class="q-totals-inner">
+            <div class="tot-row"><span class="tot-label">Subtotaal excl. BTW</span><span class="tot-val" id="tot-excl">—</span></div>
+            <div class="tot-row"><span class="tot-label">BTW (21%)</span><span class="tot-val" id="tot-vat">—</span></div>
+            <div class="tot-row grand"><span>Totaal incl. BTW</span><span id="tot-incl">—</span></div>
+          </div>
+        </div>
+
+        <!-- Opmerking -->
+        <div class="q-note">
+          <strong>Opmerking:</strong><br>
+          <textarea class="edit-field no-print" id="q-remark" placeholder="Eventuele opmerking of bijzondere voorwaarden…" rows="3"></textarea>
+          <span class="print-only" id="q-remark-print" style="display:none"></span>
+          <br><br>
+          Prijzen zijn exclusief BTW tenzij anders vermeld. Leveringstermijnen op aanvraag.
+          Deze offerte is <strong>30 dagen</strong> geldig.
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const COMPANY_NAME    = {{ company_name|tojson }};
+    const COMPANY_WEBSITE = {{ company_website|tojson }};
+    const COMPANY_EMAIL   = {{ company_email|tojson }};
+    const COMPANY_PHONE   = {{ company_phone|tojson }};
+
+    // Lees cart uit sessionStorage
+    const cart = JSON.parse(sessionStorage.getItem('offerte_cart') || '{}');
+    const lines = Object.values(cart);
+
+    // Datum
+    const now   = new Date();
+    const fmt   = d => d.toLocaleDateString('nl-BE', {day:'2-digit',month:'2-digit',year:'numeric'});
+    const valid = new Date(now); valid.setDate(valid.getDate() + 30);
+    document.getElementById('q-date').textContent  = fmt(now);
+    document.getElementById('q-valid').textContent = fmt(valid);
+    document.getElementById('q-number').textContent = 'Concept / ' + now.getFullYear()
+      + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+
+    // Bedrijfsinfo
+    const cInfo = [COMPANY_WEBSITE, COMPANY_EMAIL, COMPANY_PHONE].filter(Boolean).join(' · ');
+    document.getElementById('company-info').textContent = cInfo;
+
+    if (!lines.length) {
+      document.getElementById('no-items').style.display = 'block';
+    } else {
+      document.getElementById('quote-content').style.display = 'block';
+      buildLines();
+      loadPartner();
+    }
+
+    // Sync opmerking naar print-only span
+    document.getElementById('q-remark').addEventListener('input', function() {
+      document.getElementById('q-remark-print').textContent = this.value;
+    });
+
+    function buildLines() {
+      const tbody = document.getElementById('q-lines-body');
+      let subtotal = 0;
+      tbody.innerHTML = lines.map((l, i) => {
+        const total = (l.price||0) * (l.qty||1);
+        subtotal += total;
+        return `<tr>
+          <td style="color:var(--text-muted)">${i+1}</td>
+          <td><div class="td-name">${escHtml(l.name)}</div>${l.ref ? `<div class="td-ref">${escHtml(l.ref)}</div>` : ''}</td>
+          <td>${escHtml(l.uom||'stuk')}</td>
+          <td>${l.qty||1}</td>
+          <td>${fmtEuro(l.price||0)}</td>
+          <td>${fmtEuro(total)}</td>
+        </tr>`;
+      }).join('');
+      const vat  = subtotal * 0.21;
+      const incl = subtotal + vat;
+      document.getElementById('tot-excl').textContent = fmtEuro(subtotal);
+      document.getElementById('tot-vat').textContent  = fmtEuro(vat);
+      document.getElementById('tot-incl').textContent = fmtEuro(incl);
+    }
+
+    async function loadPartner() {
+      try {
+        const r = await fetch('/api/partner');
+        const d = await r.json();
+        const p = d.partner || {};
+        const sellerLines = [COMPANY_NAME, COMPANY_WEBSITE, COMPANY_EMAIL, COMPANY_PHONE].filter(Boolean);
+        document.getElementById('seller-addr').innerHTML = sellerLines.map(escHtml).join('<br>');
+        const buyerLines = [
+          p.name,
+          p.street,
+          [p.zip, p.city].filter(Boolean).join(' '),
+          p.country_id?.[1],
+          p.vat ? `BTW: ${p.vat}` : '',
+          p.email, p.phone,
+        ].filter(Boolean);
+        document.getElementById('buyer-addr').innerHTML = buyerLines.map(escHtml).join('<br>');
+      } catch(_) {}
+    }
+
+    function fmtEuro(n) {
+      return '€ ' + (n||0).toLocaleString('nl-BE', {minimumFractionDigits:2, maximumFractionDigits:2});
+    }
+    function escHtml(s) {
+      return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // Print-knop sync: opmerking meenemen
+    window.addEventListener('beforeprint', () => {
+      const r = document.getElementById('q-remark').value;
+      const el = document.getElementById('q-remark-print');
+      el.textContent = r; el.style.display = r ? 'inline' : 'none';
+    });
+  </script>
+</body>
+</html>

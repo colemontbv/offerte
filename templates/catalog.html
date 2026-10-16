@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Offerte opmaken — {{ company_name }}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --moss: #2d4a2d; --moss-light: #edf2ed; --primary: #3b6e3b;
+      --text: #1a1a1a; --text-muted: #6b7280;
+      --border: #e5e7eb; --surface: #fff; --bg: #f5f0e8;
+      --radius: 10px;
+    }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
+
+    /* ── Header ── */
+    header {
+      background: var(--moss); color: #fff;
+      padding: 0 24px; height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .h-brand { font-weight: 700; font-size: 16px; }
+    .h-right  { display: flex; align-items: center; gap: 16px; font-size: 13px; }
+    .h-user   { opacity: .8; }
+    .btn-sm {
+      padding: 5px 14px; border-radius: 6px; font-size: 12px; font-weight: 600;
+      cursor: pointer; border: 1.5px solid rgba(255,255,255,.4);
+      background: transparent; color: #fff; transition: background .15s;
+    }
+    .btn-sm:hover { background: rgba(255,255,255,.15); }
+    .btn-quote {
+      background: #fff; color: var(--moss); border-color: #fff;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .btn-quote:hover { background: #f0f0f0; }
+    .cart-badge {
+      background: #e74c3c; color: #fff; border-radius: 10px;
+      font-size: 10px; font-weight: 700; padding: 1px 6px; min-width: 18px;
+      text-align: center; display: none;
+    }
+
+    /* ── Layout ── */
+    .main { max-width: 1280px; margin: 0 auto; padding: 24px 20px; }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    .search-wrap { position: relative; flex: 1; min-width: 200px; max-width: 360px; }
+    .search-wrap input {
+      width: 100%; padding: 8px 14px 8px 36px;
+      border: 1.5px solid var(--border); border-radius: 8px;
+      font-size: 13px; font-family: inherit; outline: none;
+      transition: border-color .15s;
+    }
+    .search-wrap input:focus { border-color: var(--primary); }
+    .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 14px; pointer-events: none; }
+    .cat-filter {
+      display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    }
+    .cat-btn {
+      padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 600;
+      border: 1.5px solid var(--border); background: #fff; color: var(--text-muted);
+      cursor: pointer; transition: all .12s; white-space: nowrap;
+    }
+    .cat-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .cat-btn.active { background: var(--moss); border-color: var(--moss); color: #fff; }
+
+    /* ── Product grid ── */
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .prod-card {
+      background: var(--surface); border-radius: var(--radius);
+      border: 1.5px solid var(--border);
+      display: flex; flex-direction: column;
+      transition: box-shadow .15s, border-color .15s;
+      overflow: hidden;
+    }
+    .prod-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.1); border-color: #ccc; }
+    .prod-img {
+      width: 100%; aspect-ratio: 4/3; object-fit: contain;
+      background: #f8f6f1; padding: 12px;
+    }
+    .prod-img-placeholder {
+      width: 100%; aspect-ratio: 4/3; background: #f0ede6;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 32px;
+    }
+    .prod-body { padding: 12px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .prod-name { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.35; }
+    .prod-ref  { font-size: 10px; color: var(--text-muted); }
+    .prod-desc { font-size: 11px; color: var(--text-muted); line-height: 1.4; flex: 1; }
+    .prod-footer { padding: 0 12px 12px; display: flex; align-items: center; gap: 8px; }
+    .prod-price { font-size: 15px; font-weight: 700; color: var(--moss); flex: 1; }
+    .qty-wrap { display: flex; align-items: center; gap: 4px; }
+    .qty-btn {
+      width: 26px; height: 26px; border-radius: 6px; border: 1.5px solid var(--border);
+      background: #fff; font-size: 16px; line-height: 1; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; color: var(--text);
+      transition: background .1s;
+    }
+    .qty-btn:hover { background: var(--moss-light); border-color: var(--primary); }
+    .qty-val {
+      width: 32px; text-align: center; font-size: 13px; font-weight: 600;
+      border: none; outline: none; background: transparent;
+    }
+    .btn-add {
+      padding: 6px 14px; background: var(--moss); color: #fff;
+      border: none; border-radius: 7px; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: background .12s; white-space: nowrap;
+    }
+    .btn-add:hover { background: var(--primary); }
+    .btn-add.in-cart { background: #1a7f1a; }
+
+    /* ── Empty state ── */
+    .empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+    .empty p { margin-top: 8px; font-size: 14px; }
+
+    /* ── Loading ── */
+    .loading { text-align: center; padding: 60px; color: var(--text-muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="h-brand">{{ company_name }} — Offerte</span>
+    <div class="h-right">
+      <span class="h-user">{{ partner_name }}</span>
+      <button class="btn-sm btn-quote" onclick="goToQuote()">
+        🛒 Offerte bekijken <span class="cart-badge" id="cart-badge">0</span>
+      </button>
+      <button class="btn-sm" onclick="doLogout()">Afmelden</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <div class="toolbar">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="search" id="search-input" placeholder="Zoek product…" oninput="filterProducts()">
+      </div>
+      <div class="cat-filter" id="cat-filter"></div>
+    </div>
+    <div id="product-grid" class="product-grid">
+      <div class="loading">Producten laden…</div>
+    </div>
+  </div>
+
+  <script>
+    let allProducts  = [];
+    let cart         = JSON.parse(sessionStorage.getItem('offerte_cart') || '{}');
+    let activeCat    = null;
+    let imageCache   = {};
+
+    // ── Laden ─────────────────────────────────────────────────────────
+    async function loadProducts() {
+      try {
+        const r = await fetch('/api/products');
+        const d = await r.json();
+        allProducts = d.products || [];
+        buildCatFilter();
+        renderGrid();
+        updateCartBadge();
+      } catch(e) {
+        document.getElementById('product-grid').innerHTML =
+          '<div class="empty">⚠ Producten konden niet worden geladen.</div>';
+      }
+    }
+
+    function buildCatFilter() {
+      const cats = new Map();
+      allProducts.forEach(p => {
+        const cid = p.categ_id ? p.categ_id[0] : 0;
+        const cn  = p.categ_id ? p.categ_id[1] : 'Overige';
+        if (!cats.has(cid)) cats.set(cid, cn);
+      });
+      const sorted = [...cats.entries()].sort((a,b) => a[1].localeCompare(b[1],'nl'));
+      const wrap = document.getElementById('cat-filter');
+      wrap.innerHTML = `<button class="cat-btn active" onclick="setActiveCat(null, this)">Alle</button>`
+        + sorted.map(([id,name]) =>
+            `<button class="cat-btn" onclick="setActiveCat(${id}, this)">${escHtml(name)}</button>`
+          ).join('');
+    }
+
+    function setActiveCat(cid, btn) {
+      activeCat = cid;
+      document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderGrid();
+    }
+
+    function filterProducts() { renderGrid(); }
+
+    function renderGrid() {
+      const q = document.getElementById('search-input').value.toLowerCase();
+      let list = allProducts;
+      if (activeCat !== null) list = list.filter(p => p.categ_id && p.categ_id[0] === activeCat);
+      if (q) list = list.filter(p => (p.name||'').toLowerCase().includes(q)
+                                  || (p.default_code||'').toLowerCase().includes(q));
+      const grid = document.getElementById('product-grid');
+      if (!list.length) {
+        grid.innerHTML = '<div class="empty">🔍<p>Geen producten gevonden.</p></div>';
+        return;
+      }
+      grid.innerHTML = list.map(p => buildCard(p)).join('');
+    }
+
+    function buildCard(p) {
+      const inCart = !!cart[p.id];
+      const qty    = cart[p.id]?.qty || 1;
+      const price  = formatEuro(p.list_price);
+      const uom    = p.uom_id ? p.uom_id[1] : '';
+      const ref    = p.default_code ? `<div class="prod-ref">${escHtml(p.default_code)}</div>` : '';
+      const desc   = p.description_sale
+        ? `<div class="prod-desc">${escHtml(p.description_sale.slice(0,120))}${p.description_sale.length>120?'…':''}</div>`
+        : '';
+      return `
+        <div class="prod-card" data-id="${p.id}">
+          <div class="prod-img-placeholder" id="img-wrap-${p.id}" onclick="loadImage(${p.id})">📷</div>
+          <div class="prod-body">
+            <div class="prod-name">${escHtml(p.name)}</div>
+            ${ref}${desc}
+          </div>
+          <div class="prod-footer">
+            <div class="prod-price">${price}<small style="font-size:10px;font-weight:400;color:var(--text-muted)"> / ${escHtml(uom)}</small></div>
+            <div class="qty-wrap">
+              <button class="qty-btn" onclick="changeQty(${p.id},-1)">−</button>
+              <input class="qty-val" type="number" min="1" value="${qty}" id="qty-${p.id}"
+                     onchange="setQty(${p.id}, this.value)" onclick="this.select()">
+              <button class="qty-btn" onclick="changeQty(${p.id},1)">+</button>
+            </div>
+            <button class="btn-add${inCart?' in-cart':''}" id="add-${p.id}" onclick="addToCart(${p.id})">
+              ${inCart ? '✓ Toegevoegd' : '+ Voeg toe'}
+            </button>
+          </div>
+        </div>`;
+    }
+
+    // Lazy-load productafbeelding bij hover/klik
+    const imgObserver = typeof IntersectionObserver !== 'undefined'
+      ? new IntersectionObserver(entries => {
+          entries.forEach(e => { if (e.isIntersecting) loadImageEl(e.target); });
+        }, {rootMargin: '200px'})
+      : null;
+
+    function loadImage(id) {
+      const wrap = document.getElementById(`img-wrap-${id}`);
+      if (wrap) loadImageEl(wrap, id);
+    }
+
+    async function loadImageEl(wrap, id) {
+      if (!id) id = parseInt(wrap.closest('[data-id]')?.dataset.id);
+      if (!id || imageCache[id]) return;
+      imageCache[id] = true;
+      try {
+        const r = await fetch(`/api/product/${id}/image`);
+        if (r.status === 204) return;
+        const blob = await r.blob();
+        const url  = URL.createObjectURL(blob);
+        wrap.outerHTML = `<img class="prod-img" src="${url}" alt="" id="img-wrap-${id}">`;
+      } catch(_) {}
+    }
+
+    // Laad afbeeldingen na renderen
+    function observeImages() {
+      if (!imgObserver) return;
+      document.querySelectorAll('.prod-img-placeholder').forEach(el => imgObserver.observe(el));
+    }
+
+    // Override renderGrid om observer te starten
+    const _origRender = renderGrid;
+    function renderGrid() { _origRender(); setTimeout(observeImages, 0); }
+
+    // ── Cart ──────────────────────────────────────────────────────────
+    function addToCart(id) {
+      const p   = allProducts.find(x => x.id === id);
+      if (!p) return;
+      const qty = parseInt(document.getElementById(`qty-${id}`)?.value) || 1;
+      cart[id]  = { id, name: p.name, price: p.list_price, qty, uom: p.uom_id?.[1]||'', ref: p.default_code||'' };
+      saveCart();
+      updateCartBadge();
+      const btn = document.getElementById(`add-${id}`);
+      if (btn) { btn.classList.add('in-cart'); btn.textContent = '✓ Toegevoegd'; }
+    }
+
+    function changeQty(id, delta) {
+      const inp = document.getElementById(`qty-${id}`);
+      if (!inp) return;
+      const newQty = Math.max(1, (parseInt(inp.value)||1) + delta);
+      inp.value = newQty;
+      if (cart[id]) { cart[id].qty = newQty; saveCart(); }
+    }
+
+    function setQty(id, val) {
+      const q = Math.max(1, parseInt(val)||1);
+      document.getElementById(`qty-${id}`).value = q;
+      if (cart[id]) { cart[id].qty = q; saveCart(); }
+    }
+
+    function saveCart() { sessionStorage.setItem('offerte_cart', JSON.stringify(cart)); }
+
+    function updateCartBadge() {
+      const total = Object.keys(cart).length;
+      const badge = document.getElementById('cart-badge');
+      badge.textContent = total;
+      badge.style.display = total > 0 ? 'inline-block' : 'none';
+    }
+
+    function goToQuote() {
+      if (!Object.keys(cart).length) { alert('Voeg eerst producten toe aan je offerte.'); return; }
+      window.location.href = '/quote';
+    }
+
+    // ── Afmelden ──────────────────────────────────────────────────────
+    async function doLogout() {
+      await fetch('/logout', {method:'POST'});
+      sessionStorage.removeItem('offerte_cart');
+      window.location.href = '/';
+    }
+
+    // ── Utils ─────────────────────────────────────────────────────────
+    function formatEuro(n) {
+      return '€ ' + (n||0).toLocaleString('nl-BE', {minimumFractionDigits:2, maximumFractionDigits:2});
+    }
+    function escHtml(s) {
+      return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    loadProducts();
+  </script>
+</body>
+</html>
