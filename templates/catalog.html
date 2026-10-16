@@ -209,6 +209,7 @@
         return;
       }
       grid.innerHTML = list.map(p => buildCard(p)).join('');
+      setTimeout(observeImages, 0);
     }
 
     function buildCard(p) {
@@ -272,10 +273,6 @@
       if (!imgObserver) return;
       document.querySelectorAll('.prod-img-placeholder').forEach(el => imgObserver.observe(el));
     }
-
-    // Override renderGrid om observer te starten
-    const _origRender = renderGrid;
-    function renderGrid() { _origRender(); setTimeout(observeImages, 0); }
 
     // ── Cart ──────────────────────────────────────────────────────────
     function addToCart(id) {
