@@ -134,7 +134,7 @@ def api_products():
     except Exception as e:
         debug.append(f'pricelist error: {e}')
 
-    ctx = {'pricelist': pricelist_id} if pricelist_id else {}
+    ctx = {'pricelist': pricelist_id, 'lang': 'nl_BE'} if pricelist_id else {'lang': 'nl_BE'}
 
     # Haal producten op (inclusief variant-telling)
     try:
@@ -142,9 +142,8 @@ def api_products():
                               'public_categ_ids', 'uom_id', 'default_code',
                               'product_variant_count'],
                   'order': 'name asc',
-                  'limit': 1000}
-        if ctx:
-            kwargs['context'] = ctx
+                  'limit': 1000,
+                  'context': ctx}
         resp = odoo_rpc(cookies, 'product.template', 'search_read',
                         [[['is_published', '=', True], ['sale_ok', '=', True]]],
                         kwargs)
@@ -159,8 +158,8 @@ def api_products():
         debug.append(f'products exception: {e}')
         return jsonify({'error': str(e), 'debug': debug}), 500
 
-    # Bouw prijskaart uit pricelist items (fixed price per product template)
-    price_map = {}
+    # Bouw prijskaart uit pricelist items (fixed price per product template / variant)
+    price_map = {}  # tmpl_id -> price  OR  ('v', var_id) -> price
     if pricelist_id:
         try:
             items_resp = odoo_rpc(cookies, 'product.pricelist.item', 'search_read',
@@ -181,18 +180,56 @@ def api_products():
         except Exception as e:
             debug.append(f'pricelist items error: {e}')
 
-    # Voeg display_price toe aan elk product
-    for p in products:
-        p['display_price'] = price_map.get(p['id'], p['list_price'] or 0)
+    # Bereken minimumprijs voor producten met varianten
+    variant_min = {}  # tmpl_id -> min variant price
+    variant_tmpl_ids = [p['id'] for p in products if (p.get('product_variant_count') or 0) > 1]
+    if variant_tmpl_ids:
+        try:
+            vr = odoo_rpc(cookies, 'product.product', 'search_read',
+                          [[['product_tmpl_id', 'in', variant_tmpl_ids], ['active', '=', True]]],
+                          {'fields': ['id', 'product_tmpl_id', 'lst_price'],
+                           'context': ctx, 'limit': 5000})
+            for v in vr.json().get('result', []) or []:
+                tid = v['product_tmpl_id'][0] if v.get('product_tmpl_id') else None
+                if not tid:
+                    continue
+                vp = price_map.get(('v', v['id']), v.get('lst_price') or 0)
+                if vp > 0 and (tid not in variant_min or vp < variant_min[tid]):
+                    variant_min[tid] = vp
+            debug.append(f'variant min prices: {len(variant_min)}')
+        except Exception as e:
+            debug.append(f'variant min error: {e}')
 
-    # Haal categorienamen op via read met IDs uit producten
+    # Voeg display_price en price_prefix toe aan elk product
+    for p in products:
+        vc = p.get('product_variant_count') or 0
+        if vc > 1 and p['id'] in variant_min:
+            p['display_price'] = variant_min[p['id']]
+            p['price_prefix']  = 'Vanaf'
+        else:
+            p['display_price'] = price_map.get(p['id'], p['list_price'] or 0)
+            p['price_prefix']  = ''
+
+    # Haal categorienamen en ouder-kind-relaties op via read met IDs uit producten
     cats = {}
     try:
         all_cat_ids = list({cid for p in products for cid in p.get('public_categ_ids', [])})
         if all_cat_ids:
             cat_resp = odoo_rpc(cookies, 'product.public.category', 'read',
-                                [all_cat_ids, ['id', 'name']], {})
+                                [all_cat_ids, ['id', 'name', 'parent_id']], {})
             cats = {c['id']: c for c in (cat_resp.json().get('result', []) or []) if c}
+            # Voeg ook parent-records toe die niet zelf op producten staan
+            missing_parent_ids = list({
+                c['parent_id'][0]
+                for c in cats.values()
+                if c.get('parent_id') and c['parent_id'][0] not in cats
+            })
+            if missing_parent_ids:
+                pr = odoo_rpc(cookies, 'product.public.category', 'read',
+                              [missing_parent_ids, ['id', 'name', 'parent_id']], {})
+                for c in (pr.json().get('result', []) or []):
+                    if c:
+                        cats[c['id']] = c
         debug.append(f'categories: {len(cats)} (from {len(all_cat_ids)} ids)')
     except Exception as e:
         debug.append(f'categories error: {e}')

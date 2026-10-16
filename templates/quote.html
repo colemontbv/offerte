@@ -119,9 +119,29 @@
       }
       .edit-field:focus { border-bottom-color: var(--primary); }
       textarea.edit-field { resize: vertical; min-height: 40px; }
+
+      /* Inline qty editor in tabel */
+      .qty-edit {
+        width: 52px; padding: 3px 6px; border: 1.5px solid var(--border);
+        border-radius: 5px; font-family: inherit; font-size: 12px;
+        text-align: center; outline: none;
+      }
+      .qty-edit:focus { border-color: var(--primary); }
+      .btn-del {
+        padding: 3px 8px; border: 1.5px solid #fca5a5; border-radius: 5px;
+        background: #fff5f5; color: #dc2626; font-size: 11px; font-weight: 600;
+        cursor: pointer; white-space: nowrap;
+      }
+      .btn-del:hover { background: #fee2e2; }
+      .col-actions { width: 90px; text-align: center !important; }
     }
     @media print {
       .edit-field { border: none; background: transparent; }
+      .no-print { display: none !important; }
+      .print-qty { display: inline !important; }
+    }
+    @media screen {
+      .print-qty { display: none; }
     }
   </style>
 </head>
@@ -184,6 +204,7 @@
               <th style="width:70px">Aantal</th>
               <th style="width:100px">Eenheidsprijs</th>
               <th style="width:110px">Totaal excl.</th>
+              <th class="col-actions no-print">Acties</th>
             </tr>
           </thead>
           <tbody id="q-lines-body"></tbody>
@@ -218,9 +239,9 @@
     const COMPANY_EMAIL   = {{ company_email|tojson }};
     const COMPANY_PHONE   = {{ company_phone|tojson }};
 
-    // Lees cart uit sessionStorage
-    const cart = JSON.parse(sessionStorage.getItem('offerte_cart') || '{}');
-    const lines = Object.values(cart);
+    // Lees cart uit sessionStorage (live — wordt aangepast door remove/qty-edit)
+    let cart  = JSON.parse(sessionStorage.getItem('offerte_cart') || '{}');
+    let lines = Object.values(cart);
 
     // Datum
     const now   = new Date();
@@ -254,20 +275,69 @@
       tbody.innerHTML = lines.map((l, i) => {
         const total = (l.price||0) * (l.qty||1);
         subtotal += total;
-        return `<tr>
+        const cartKey = l.id ? (l.tmpl_id ? `v_${l.id}` : String(l.id)) : String(i);
+        // Bepaal echte cart-key: variant keys beginnen met v_
+        const realKey = Object.keys(cart).find(k => {
+          const c = cart[k];
+          return c.id === l.id && (l.tmpl_id ? c.tmpl_id === l.tmpl_id : !c.tmpl_id);
+        }) || cartKey;
+        return `<tr id="row-${realKey.replace(/[^a-zA-Z0-9]/g,'_')}">
           <td style="color:var(--text-muted)">${i+1}</td>
           <td><div class="td-name">${escHtml(l.name)}</div>${l.ref ? `<div class="td-ref">${escHtml(l.ref)}</div>` : ''}</td>
           <td>${escHtml(l.uom||'stuk')}</td>
-          <td>${l.qty||1}</td>
+          <td>
+            <input class="qty-edit no-print" type="number" min="1" value="${l.qty||1}"
+                   data-key="${escHtml(realKey)}" onchange="updateQty(this)">
+            <span class="print-qty" style="">${l.qty||1}</span>
+          </td>
           <td>${fmtEuro(l.price||0)}</td>
-          <td>${fmtEuro(total)}</td>
+          <td id="linetot-${realKey.replace(/[^a-zA-Z0-9]/g,'_')}">${fmtEuro(total)}</td>
+          <td class="col-actions no-print">
+            <button class="btn-del" onclick="removeLine('${escHtml(realKey)}')">✕ Verwijder</button>
+          </td>
         </tr>`;
       }).join('');
+      calcTotals();
+    }
+
+    function calcTotals() {
+      let subtotal = 0;
+      Object.values(cart).forEach(l => { subtotal += (l.price||0) * (l.qty||1); });
       const vat  = subtotal * 0.21;
       const incl = subtotal + vat;
       document.getElementById('tot-excl').textContent = fmtEuro(subtotal);
       document.getElementById('tot-vat').textContent  = fmtEuro(vat);
       document.getElementById('tot-incl').textContent = fmtEuro(incl);
+    }
+
+    function updateQty(inp) {
+      const key = inp.dataset.key;
+      const qty = Math.max(1, parseInt(inp.value)||1);
+      inp.value = qty;
+      if (cart[key]) {
+        cart[key].qty = qty;
+        sessionStorage.setItem('offerte_cart', JSON.stringify(cart));
+        // Update lijnbedrag
+        const rowId = key.replace(/[^a-zA-Z0-9]/g,'_');
+        const el = document.getElementById(`linetot-${rowId}`);
+        if (el) el.textContent = fmtEuro((cart[key].price||0) * qty);
+        // Update print qty span
+        const row = document.getElementById(`row-${rowId}`);
+        if (row) { const sp = row.querySelector('.print-qty'); if (sp) sp.textContent = qty; }
+        calcTotals();
+      }
+    }
+
+    function removeLine(key) {
+      delete cart[key];
+      sessionStorage.setItem('offerte_cart', JSON.stringify(cart));
+      lines = Object.values(cart);
+      if (!lines.length) {
+        document.getElementById('quote-content').style.display = 'none';
+        document.getElementById('no-items').style.display = 'block';
+      } else {
+        buildLines();
+      }
     }
 
     async function loadPartner() {

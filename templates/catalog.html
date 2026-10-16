@@ -48,7 +48,7 @@
     /* ── Toolbar ── */
     .toolbar {
       display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-      margin-bottom: 20px;
+      margin-bottom: 8px;
     }
     .search-wrap { position: relative; flex: 1; min-width: 200px; max-width: 360px; }
     .search-wrap input {
@@ -59,8 +59,15 @@
     }
     .search-wrap input:focus { border-color: var(--primary); }
     .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 14px; pointer-events: none; }
-    .cat-filter {
+
+    /* ── Categorie filter (2 lagen) ── */
+    .cat-filters { margin-bottom: 20px; }
+    .cat-row {
       display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+      padding: 6px 0;
+    }
+    .cat-row + .cat-row {
+      border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px;
     }
     .cat-btn {
       padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 600;
@@ -69,6 +76,7 @@
     }
     .cat-btn:hover { border-color: var(--primary); color: var(--primary); }
     .cat-btn.active { background: var(--moss); border-color: var(--moss); color: #fff; }
+    .cat-btn.parent-active { background: var(--moss-light); border-color: var(--primary); color: var(--primary); }
 
     /* ── Product grid ── */
     .product-grid {
@@ -205,22 +213,23 @@
         <span class="search-icon">🔍</span>
         <input type="search" id="search-input" placeholder="Zoek product…" oninput="filterProducts()">
       </div>
-      <div class="cat-filter" id="cat-filter"></div>
     </div>
+    <div class="cat-filters" id="cat-filters"></div>
     <div id="product-grid" class="product-grid">
       <div class="loading">Producten laden…</div>
     </div>
   </div>
 
   <script>
-    let allProducts  = [];
-    let cart         = JSON.parse(sessionStorage.getItem('offerte_cart') || '{}');
-    let activeCat    = null;
-    let imageCache   = {};
+    let allProducts   = [];
+    let cart          = JSON.parse(sessionStorage.getItem('offerte_cart') || '{}');
+    let activeCatId   = null;   // null = alle; number = gefilterd op cat
+    let activeParent  = null;   // null = geen parent geselecteerd
+    let imageCache    = {};
+    let allCategories = [];
+    let catMap        = {};     // id -> category object
 
     // ── Laden ─────────────────────────────────────────────────────────
-    let allCategories = [];
-
     async function loadProducts() {
       try {
         const r = await fetch('/api/products');
@@ -228,6 +237,8 @@
         if (d.error) throw new Error(d.error);
         allProducts   = d.products   || [];
         allCategories = d.categories || [];
+        catMap = {};
+        allCategories.forEach(c => { catMap[c.id] = c; });
         buildCatFilter();
         renderGrid();
         updateCartBadge();
@@ -238,20 +249,68 @@
     }
 
     function buildCatFilter() {
-      // Gebruik enkel categorieën die effectief op producten staan
       const usedIds = new Set(allProducts.flatMap(p => (p.web_categories||[]).map(c => c.id)));
-      const visible = allCategories.filter(c => usedIds.has(c.id));
-      const wrap = document.getElementById('cat-filter');
-      wrap.innerHTML = `<button class="cat-btn active" onclick="setActiveCat(null, this)">Alle</button>`
-        + visible.map(c =>
-            `<button class="cat-btn" onclick="setActiveCat(${c.id}, this)">${escHtml(c.name)}</button>`
+
+      // Bepaal parents: categorie waarvan parent_id niet in onze lijst zit (of false)
+      const isRoot = c => !c.parent_id || !catMap[c.parent_id[0]];
+      const parents = allCategories.filter(c => usedIds.has(c.id) && isRoot(c))
+                                    .sort((a,b) => a.name.localeCompare(b.name));
+      // Kinderen van een parent
+      const childrenOf = pid => allCategories
+        .filter(c => usedIds.has(c.id) && c.parent_id && c.parent_id[0] === pid)
+        .sort((a,b) => a.name.localeCompare(b.name));
+
+      const wrap = document.getElementById('cat-filters');
+
+      // Rij 1: Alle + parents
+      const parentBtns = parents.map(c => {
+        const kids = childrenOf(c.id);
+        const isActive = activeParent === c.id;
+        return `<button class="cat-btn${isActive ? ' parent-active' : ''}" id="pbtn-${c.id}"
+                  onclick="selectParent(${c.id})">${escHtml(c.name)}${kids.length ? ' ›' : ''}</button>`;
+      }).join('');
+
+      // Rij 2: kinderen van geselecteerde parent (als die kinderen heeft)
+      let childRow = '';
+      if (activeParent !== null) {
+        const kids = childrenOf(activeParent);
+        if (kids.length) {
+          const allKidsBtn = `<button class="cat-btn${activeCatId === null ? ' active' : ''}"
+                                onclick="setActiveCat(null)">Alle ${escHtml(catMap[activeParent]?.name||'')}</button>`;
+          const kidBtns = kids.map(c =>
+            `<button class="cat-btn${activeCatId === c.id ? ' active' : ''}"
+               onclick="setActiveCat(${c.id})">${escHtml(c.name)}</button>`
           ).join('');
+          childRow = `<div class="cat-row">${allKidsBtn}${kidBtns}</div>`;
+        }
+      }
+
+      wrap.innerHTML =
+        `<div class="cat-row">
+           <button class="cat-btn${activeParent === null && activeCatId === null ? ' active' : ''}"
+                   onclick="selectParent(null)">Alle</button>
+           ${parentBtns}
+         </div>${childRow}`;
     }
 
-    function setActiveCat(cid, btn) {
-      activeCat = cid;
-      document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+    function selectParent(pid) {
+      activeParent = pid;
+      activeCatId  = null;
+      // Als de parent geen kinderen heeft, filter direct op die parent-categorie
+      if (pid !== null) {
+        const kids = allCategories.filter(c =>
+          c.parent_id && c.parent_id[0] === pid &&
+          new Set(allProducts.flatMap(p => (p.web_categories||[]).map(x => x.id))).has(c.id)
+        );
+        if (!kids.length) activeCatId = pid;
+      }
+      buildCatFilter();
+      renderGrid();
+    }
+
+    function setActiveCat(cid) {
+      activeCatId = cid;
+      buildCatFilter();
       renderGrid();
     }
 
@@ -260,7 +319,17 @@
     function renderGrid() {
       const q = document.getElementById('search-input').value.toLowerCase();
       let list = allProducts;
-      if (activeCat !== null) list = list.filter(p => (p.web_categories||[]).some(c => c.id === activeCat));
+      // Filter op actieve categorie (kind of parent zonder kinderen)
+      if (activeCatId !== null) {
+        list = list.filter(p => (p.web_categories||[]).some(c => c.id === activeCatId));
+      } else if (activeParent !== null) {
+        // Filter op alle producten die een kind-categorie van de parent hebben
+        const kidIds = new Set(allCategories
+          .filter(c => c.parent_id && c.parent_id[0] === activeParent)
+          .map(c => c.id));
+        kidIds.add(activeParent);
+        list = list.filter(p => (p.web_categories||[]).some(c => kidIds.has(c.id)));
+      }
       if (q) list = list.filter(p => (p.name||'').toLowerCase().includes(q)
                                   || (p.default_code||'').toLowerCase().includes(q));
       const grid = document.getElementById('product-grid');
@@ -279,7 +348,9 @@
         ? Object.keys(cart).some(k => k.startsWith(`v_`) && cart[k].tmpl_id === p.id)
         : !!cart[cartKey];
       const qty     = cart[cartKey]?.qty || 1;
-      const price   = formatEuro(p.display_price || 0);
+      const rawPrice = p.display_price || 0;
+      const prefix   = p.price_prefix || '';
+      const price    = (prefix ? `<span style="font-size:10px;font-weight:500">${escHtml(prefix)} </span>` : '') + formatEuro(rawPrice);
       const uom     = p.uom_id ? p.uom_id[1] : '';
       const ref     = p.default_code ? `<div class="prod-ref">${escHtml(p.default_code)}</div>` : '';
       const desc    = p.description_sale
@@ -350,6 +421,7 @@
 
     // ── Variant modal ──────────────────────────────────────────────────
     let currentTmplId = null;
+    let variantStore  = {};  // varId -> {id, tmpl_id, name, price, uom, ref}
 
     async function openVariantModal(tmplId) {
       currentTmplId = tmplId;
@@ -371,6 +443,14 @@
 
     function renderVariantList(tmplId, variants, tmpl) {
       const uom = tmpl?.uom_id?.[1] || '';
+      // Sla variant-data op zodat onclick-handlers geen JSON in attributen nodig hebben
+      variants.forEach(v => {
+        variantStore[v.id] = {
+          id: v.id, tmpl_id: tmplId,
+          name: v.variant_label || v.display_name,
+          price: v.display_price, uom, ref: v.default_code || ''
+        };
+      });
       const html = variants.map(v => {
         const cartKey = `v_${v.id}`;
         const inCart  = !!cart[cartKey];
@@ -380,13 +460,13 @@
             <div class="variant-name">${escHtml(v.variant_label || v.display_name)}</div>
             <div class="variant-price">${formatEuro(v.display_price)}</div>
             <div class="variant-qty-wrap">
-              <button class="v-qty-btn" onclick="changeVQty('${cartKey}',-1)">−</button>
+              <button class="v-qty-btn" onclick="changeVQty(${v.id},-1)">−</button>
               <input class="v-qty-val" type="number" min="1" value="${qty}"
-                     id="vqty-${v.id}" onchange="setVQty('${cartKey}', this.value)" onclick="this.select()">
-              <button class="v-qty-btn" onclick="changeVQty('${cartKey}',1)">+</button>
+                     id="vqty-${v.id}" onchange="setVQty(${v.id}, this.value)" onclick="this.select()">
+              <button class="v-qty-btn" onclick="changeVQty(${v.id},1)">+</button>
             </div>
             <button class="btn-v-add${inCart?' in-cart':''}" id="vadd-${v.id}"
-                    onclick="addVariantToCart(${tmplId}, ${v.id}, ${JSON.stringify(v.variant_label||v.display_name).replace(/</g,'\\u003c')}, ${v.display_price}, '${escHtml(uom)}', '${escHtml(v.default_code||'')}')">
+                    onclick="addVariantToCart(${v.id})">
               ${inCart ? '✓ In offerte' : '+ Voeg toe'}
             </button>
           </div>`;
@@ -394,33 +474,34 @@
       document.getElementById('vm-list').innerHTML = html || '<div class="modal-loading">Geen varianten gevonden.</div>';
     }
 
-    function addVariantToCart(tmplId, varId, varName, price, uom, ref) {
+    function addVariantToCart(varId) {
+      const v = variantStore[varId];
+      if (!v) return;
       const cartKey = `v_${varId}`;
       const qty = parseInt(document.getElementById(`vqty-${varId}`)?.value) || 1;
-      cart[cartKey] = { id: varId, tmpl_id: tmplId, name: varName, price, qty, uom, ref };
+      cart[cartKey] = { id: varId, tmpl_id: v.tmpl_id, name: v.name, price: v.price, qty, uom: v.uom, ref: v.ref };
       saveCart();
       updateCartBadge();
       const btn = document.getElementById(`vadd-${varId}`);
       if (btn) { btn.classList.add('in-cart'); btn.textContent = '✓ In offerte'; }
-      // Update de kaartknop
-      const cardBtn = document.getElementById(`add-${tmplId}`);
+      const cardBtn = document.getElementById(`add-${v.tmpl_id}`);
       if (cardBtn) { cardBtn.classList.add('in-cart'); cardBtn.innerHTML = '✓ Varianten'; }
     }
 
-    function changeVQty(cartKey, delta) {
-      const varId = cartKey.replace('v_','');
+    function changeVQty(varId, delta) {
       const inp = document.getElementById(`vqty-${varId}`);
       if (!inp) return;
       const newQty = Math.max(1, (parseInt(inp.value)||1) + delta);
       inp.value = newQty;
+      const cartKey = `v_${varId}`;
       if (cart[cartKey]) { cart[cartKey].qty = newQty; saveCart(); }
     }
 
-    function setVQty(cartKey, val) {
-      const varId = cartKey.replace('v_','');
+    function setVQty(varId, val) {
       const q = Math.max(1, parseInt(val)||1);
       const inp = document.getElementById(`vqty-${varId}`);
       if (inp) inp.value = q;
+      const cartKey = `v_${varId}`;
       if (cart[cartKey]) { cart[cartKey].qty = q; saveCart(); }
     }
 
