@@ -136,15 +136,20 @@ def api_products():
 
     ctx = {'pricelist': pricelist_id} if pricelist_id else {}
 
-    # Haal webcategorieën op (kan falen — geen blocker)
+    # Haal webcategorieën op via read (omzeilt record rules voor portaalgebruikers)
     cats = {}
     try:
-        cat_resp = odoo_rpc(cookies, 'product.public.category', 'search_read',
-                            [[]],
-                            {'fields': ['id', 'name', 'complete_name'], 'limit': 500})
-        cat_data = cat_resp.json()
-        cats = {c['id']: c for c in cat_data.get('result', [])}
-        debug.append(f'categories: {len(cats)}')
+        resp_tmp = odoo_rpc(cookies, 'product.template', 'search_read',
+                            [[['is_published', '=', True], ['sale_ok', '=', True]]],
+                            {'fields': ['public_categ_ids'], 'limit': 2000})
+        all_cat_ids = list({cid
+                            for p in resp_tmp.json().get('result', [])
+                            for cid in p.get('public_categ_ids', [])})
+        if all_cat_ids:
+            cat_resp = odoo_rpc(cookies, 'product.public.category', 'read',
+                                [all_cat_ids, ['id', 'name', 'complete_name']], {})
+            cats = {c['id']: c for c in cat_resp.json().get('result', []) if c}
+        debug.append(f'categories: {len(cats)} (from {len(all_cat_ids)} ids)')
     except Exception as e:
         debug.append(f'categories error: {e}')
 
