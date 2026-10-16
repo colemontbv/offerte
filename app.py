@@ -136,27 +136,11 @@ def api_products():
 
     ctx = {'pricelist': pricelist_id} if pricelist_id else {}
 
-    # Haal webcategorieën op via read (omzeilt record rules voor portaalgebruikers)
-    cats = {}
-    try:
-        resp_tmp = odoo_rpc(cookies, 'product.template', 'search_read',
-                            [[['is_published', '=', True], ['sale_ok', '=', True]]],
-                            {'fields': ['public_categ_ids'], 'limit': 2000})
-        all_cat_ids = list({cid
-                            for p in resp_tmp.json().get('result', [])
-                            for cid in p.get('public_categ_ids', [])})
-        if all_cat_ids:
-            cat_resp = odoo_rpc(cookies, 'product.public.category', 'read',
-                                [all_cat_ids, ['id', 'name', 'complete_name']], {})
-            cats = {c['id']: c for c in cat_resp.json().get('result', []) if c}
-        debug.append(f'categories: {len(cats)} (from {len(all_cat_ids)} ids)')
-    except Exception as e:
-        debug.append(f'categories error: {e}')
-
-    # Haal producten op
+    # Haal producten op (inclusief variant-telling)
     try:
         kwargs = {'fields': ['id', 'name', 'description_sale', 'list_price',
-                              'public_categ_ids', 'uom_id', 'default_code'],
+                              'public_categ_ids', 'uom_id', 'default_code',
+                              'product_variant_count'],
                   'order': 'name asc',
                   'limit': 1000}
         if ctx:
@@ -175,17 +159,108 @@ def api_products():
         debug.append(f'products exception: {e}')
         return jsonify({'error': str(e), 'debug': debug}), 500
 
-    # Koppel categorienamen
+    # Bouw prijskaart uit pricelist items (fixed price per product template)
+    price_map = {}
+    if pricelist_id:
+        try:
+            items_resp = odoo_rpc(cookies, 'product.pricelist.item', 'search_read',
+                                  [[['pricelist_id', '=', pricelist_id],
+                                    ['compute_price', '=', 'fixed']]],
+                                  {'fields': ['applied_on', 'product_tmpl_id',
+                                              'product_id', 'fixed_price'],
+                                   'limit': 5000})
+            for item in items_resp.json().get('result', []) or []:
+                if item.get('applied_on') == '1_product' and item.get('product_tmpl_id'):
+                    tmpl_id = item['product_tmpl_id'][0]
+                    if tmpl_id not in price_map:
+                        price_map[tmpl_id] = item['fixed_price']
+                elif item.get('applied_on') == '0_product_variant' and item.get('product_id'):
+                    var_id = item['product_id'][0]
+                    price_map[('v', var_id)] = item['fixed_price']
+            debug.append(f'pricelist items: {len(price_map)}')
+        except Exception as e:
+            debug.append(f'pricelist items error: {e}')
+
+    # Voeg display_price toe aan elk product
+    for p in products:
+        p['display_price'] = price_map.get(p['id'], p['list_price'] or 0)
+
+    # Haal categorienamen op via read met IDs uit producten
+    cats = {}
+    try:
+        all_cat_ids = list({cid for p in products for cid in p.get('public_categ_ids', [])})
+        if all_cat_ids:
+            cat_resp = odoo_rpc(cookies, 'product.public.category', 'read',
+                                [all_cat_ids, ['id', 'name']], {})
+            cats = {c['id']: c for c in (cat_resp.json().get('result', []) or []) if c}
+        debug.append(f'categories: {len(cats)} (from {len(all_cat_ids)} ids)')
+    except Exception as e:
+        debug.append(f'categories error: {e}')
+
+    # Koppel categorienamen aan producten
     for p in products:
         p['web_categories'] = [
-            {'id': cid, 'name': cats[cid]['name'],
-             'complete_name': cats[cid].get('complete_name', cats[cid]['name'])}
+            {'id': cid, 'name': cats[cid]['name']}
             for cid in p.get('public_categ_ids', []) if cid in cats
         ]
 
     return jsonify({'products': products,
-                    'categories': sorted(cats.values(), key=lambda c: c.get('complete_name', '')),
+                    'categories': sorted(cats.values(), key=lambda c: c.get('name', '')),
                     'debug': debug})
+
+
+@app.route('/api/product/<int:tmpl_id>/variants')
+def product_variants(tmpl_id):
+    if not session.get('odoo_session'):
+        return jsonify({'error': 'Niet ingelogd'}), 401
+    cookies = {'session_id': session['odoo_session']}
+    try:
+        # Haal pricelist op voor prijscontext
+        pricelist_id = None
+        pl_resp = odoo_rpc(cookies, 'product.pricelist', 'search_read',
+                           [[['name', 'ilike', 'Default']]],
+                           {'fields': ['id'], 'limit': 1})
+        pl_data = pl_resp.json().get('result', [])
+        if pl_data:
+            pricelist_id = pl_data[0]['id']
+
+        # Haal varianten op
+        kwargs = {'fields': ['id', 'display_name', 'lst_price',
+                             'product_template_attribute_value_ids', 'default_code'],
+                  'limit': 100}
+        if pricelist_id:
+            kwargs['context'] = {'pricelist': pricelist_id}
+        var_resp = odoo_rpc(cookies, 'product.product', 'search_read',
+                            [[['product_tmpl_id', '=', tmpl_id], ['active', '=', True]]],
+                            kwargs)
+        variants = var_resp.json().get('result', []) or []
+
+        # Haal pricelist variant-items op voor eventuele fixed prices
+        price_map = {}
+        if pricelist_id and variants:
+            var_ids = [v['id'] for v in variants]
+            items_resp = odoo_rpc(cookies, 'product.pricelist.item', 'search_read',
+                                  [[['pricelist_id', '=', pricelist_id],
+                                    ['compute_price', '=', 'fixed'],
+                                    ['applied_on', '=', '0_product_variant'],
+                                    ['product_id', 'in', var_ids]]],
+                                  {'fields': ['product_id', 'fixed_price'], 'limit': 200})
+            for item in items_resp.json().get('result', []) or []:
+                if item.get('product_id'):
+                    price_map[item['product_id'][0]] = item['fixed_price']
+
+        for v in variants:
+            v['display_price'] = price_map.get(v['id'], v.get('lst_price', 0))
+            # Bouw een korte variantnaam (enkel het variante deel, zonder templatenaam)
+            full = v.get('display_name', '')
+            if '(' in full and full.endswith(')'):
+                v['variant_label'] = full[full.index('(')+1:-1]
+            else:
+                v['variant_label'] = full
+
+        return jsonify({'variants': variants})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/product/<int:tmpl_id>/image')

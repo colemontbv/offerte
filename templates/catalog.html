@@ -125,6 +125,56 @@
 
     /* ── Loading ── */
     .loading { text-align: center; padding: 60px; color: var(--text-muted); font-size: 14px; }
+
+    /* ── Variant modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.45);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 500; padding: 20px;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal-box {
+      background: #fff; border-radius: 12px; padding: 24px;
+      max-width: 480px; width: 100%; max-height: 80vh;
+      overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,.2);
+    }
+    .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .modal-sub   { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; }
+    .variant-list { display: flex; flex-direction: column; gap: 8px; }
+    .variant-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 8px;
+      transition: border-color .12s;
+    }
+    .variant-row:hover { border-color: var(--primary); }
+    .variant-name  { flex: 1; font-size: 13px; font-weight: 500; }
+    .variant-price { font-size: 13px; font-weight: 700; color: var(--moss); white-space: nowrap; }
+    .variant-qty-wrap { display: flex; align-items: center; gap: 3px; }
+    .v-qty-btn {
+      width: 24px; height: 24px; border-radius: 5px; border: 1.5px solid var(--border);
+      background: #fff; font-size: 15px; cursor: pointer; display: flex;
+      align-items: center; justify-content: center; color: var(--text);
+    }
+    .v-qty-btn:hover { background: var(--moss-light); }
+    .v-qty-val {
+      width: 30px; text-align: center; font-size: 13px; font-weight: 600;
+      border: none; outline: none; background: transparent;
+    }
+    .btn-v-add {
+      padding: 6px 12px; background: var(--moss); color: #fff;
+      border: none; border-radius: 7px; font-size: 12px; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+    }
+    .btn-v-add:hover { background: var(--primary); }
+    .btn-v-add.in-cart { background: #1a7f1a; }
+    .modal-close {
+      display: block; margin-top: 16px; width: 100%; padding: 8px;
+      border: 1.5px solid var(--border); border-radius: 8px; background: #fff;
+      font-size: 13px; cursor: pointer; color: var(--text-muted);
+    }
+    .modal-close:hover { background: #f5f5f5; }
+    .modal-loading { text-align: center; padding: 24px; color: var(--text-muted); }
+    .btn-add.has-variants { background: var(--primary); }
   </style>
 </head>
 <body>
@@ -138,6 +188,16 @@
       <button class="btn-sm" onclick="doLogout()">Afmelden</button>
     </div>
   </header>
+
+  <!-- Variant modal -->
+  <div class="modal-overlay hidden" id="variant-modal" onclick="closeVariantModal(event)">
+    <div class="modal-box">
+      <div class="modal-title" id="vm-title"></div>
+      <div class="modal-sub">Kies de gewenste variant:</div>
+      <div class="variant-list" id="vm-list"></div>
+      <button class="modal-close" onclick="closeVariantModalDirect()">Sluiten</button>
+    </div>
+  </div>
 
   <div class="main">
     <div class="toolbar">
@@ -213,15 +273,32 @@
     }
 
     function buildCard(p) {
-      const inCart = !!cart[p.id];
-      const qty    = cart[p.id]?.qty || 1;
-      const rawPrice = p.lst_price || 0;
-      const price  = formatEuro(rawPrice);
-      const uom    = p.uom_id ? p.uom_id[1] : '';
-      const ref    = p.default_code ? `<div class="prod-ref">${escHtml(p.default_code)}</div>` : '';
-      const desc   = p.description_sale
+      const hasVariants = (p.product_variant_count || 0) > 1;
+      const cartKey = p.id;  // for templates; variant items use 'v_<variantId>'
+      const inCart  = hasVariants
+        ? Object.keys(cart).some(k => k.startsWith(`v_`) && cart[k].tmpl_id === p.id)
+        : !!cart[cartKey];
+      const qty     = cart[cartKey]?.qty || 1;
+      const price   = formatEuro(p.display_price || 0);
+      const uom     = p.uom_id ? p.uom_id[1] : '';
+      const ref     = p.default_code ? `<div class="prod-ref">${escHtml(p.default_code)}</div>` : '';
+      const desc    = p.description_sale
         ? `<div class="prod-desc">${escHtml(p.description_sale.slice(0,120))}${p.description_sale.length>120?'…':''}</div>`
         : '';
+      const addBtn = hasVariants
+        ? `<button class="btn-add has-variants${inCart?' in-cart':''}" id="add-${p.id}" onclick="openVariantModal(${p.id})">
+             ${inCart ? '✓ Varianten' : '⊞ Kies variant'}
+           </button>`
+        : `<button class="btn-add${inCart?' in-cart':''}" id="add-${p.id}" onclick="addToCart(${p.id})">
+             ${inCart ? '✓ Toegevoegd' : '+ Voeg toe'}
+           </button>`;
+      const qtyControls = hasVariants ? '' : `
+            <div class="qty-wrap">
+              <button class="qty-btn" onclick="changeQty(${p.id},-1)">−</button>
+              <input class="qty-val" type="number" min="1" value="${qty}" id="qty-${p.id}"
+                     onchange="setQty(${p.id}, this.value)" onclick="this.select()">
+              <button class="qty-btn" onclick="changeQty(${p.id},1)">+</button>
+            </div>`;
       return `
         <div class="prod-card" data-id="${p.id}">
           <div class="prod-img-placeholder" id="img-wrap-${p.id}" onclick="loadImage(${p.id})">📷</div>
@@ -231,15 +308,8 @@
           </div>
           <div class="prod-footer">
             <div class="prod-price">${price}<small style="font-size:10px;font-weight:400;color:var(--text-muted)"> / ${escHtml(uom)}</small></div>
-            <div class="qty-wrap">
-              <button class="qty-btn" onclick="changeQty(${p.id},-1)">−</button>
-              <input class="qty-val" type="number" min="1" value="${qty}" id="qty-${p.id}"
-                     onchange="setQty(${p.id}, this.value)" onclick="this.select()">
-              <button class="qty-btn" onclick="changeQty(${p.id},1)">+</button>
-            </div>
-            <button class="btn-add${inCart?' in-cart':''}" id="add-${p.id}" onclick="addToCart(${p.id})">
-              ${inCart ? '✓ Toegevoegd' : '+ Voeg toe'}
-            </button>
+            ${qtyControls}
+            ${addBtn}
           </div>
         </div>`;
     }
@@ -278,12 +348,96 @@
       nextBatch();
     }
 
+    // ── Variant modal ──────────────────────────────────────────────────
+    let currentTmplId = null;
+
+    async function openVariantModal(tmplId) {
+      currentTmplId = tmplId;
+      const p = allProducts.find(x => x.id === tmplId);
+      document.getElementById('vm-title').textContent = p ? p.name : 'Varianten';
+      document.getElementById('vm-list').innerHTML = '<div class="modal-loading">Laden…</div>';
+      document.getElementById('variant-modal').classList.remove('hidden');
+
+      try {
+        const r = await fetch(`/api/product/${tmplId}/variants`);
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        renderVariantList(tmplId, d.variants || [], p);
+      } catch(e) {
+        document.getElementById('vm-list').innerHTML =
+          `<div class="modal-loading">Fout: ${escHtml(e.message)}</div>`;
+      }
+    }
+
+    function renderVariantList(tmplId, variants, tmpl) {
+      const uom = tmpl?.uom_id?.[1] || '';
+      const html = variants.map(v => {
+        const cartKey = `v_${v.id}`;
+        const inCart  = !!cart[cartKey];
+        const qty     = cart[cartKey]?.qty || 1;
+        return `
+          <div class="variant-row">
+            <div class="variant-name">${escHtml(v.variant_label || v.display_name)}</div>
+            <div class="variant-price">${formatEuro(v.display_price)}</div>
+            <div class="variant-qty-wrap">
+              <button class="v-qty-btn" onclick="changeVQty('${cartKey}',-1)">−</button>
+              <input class="v-qty-val" type="number" min="1" value="${qty}"
+                     id="vqty-${v.id}" onchange="setVQty('${cartKey}', this.value)" onclick="this.select()">
+              <button class="v-qty-btn" onclick="changeVQty('${cartKey}',1)">+</button>
+            </div>
+            <button class="btn-v-add${inCart?' in-cart':''}" id="vadd-${v.id}"
+                    onclick="addVariantToCart(${tmplId}, ${v.id}, ${JSON.stringify(v.variant_label||v.display_name).replace(/</g,'\\u003c')}, ${v.display_price}, '${escHtml(uom)}', '${escHtml(v.default_code||'')}')">
+              ${inCart ? '✓ In offerte' : '+ Voeg toe'}
+            </button>
+          </div>`;
+      }).join('');
+      document.getElementById('vm-list').innerHTML = html || '<div class="modal-loading">Geen varianten gevonden.</div>';
+    }
+
+    function addVariantToCart(tmplId, varId, varName, price, uom, ref) {
+      const cartKey = `v_${varId}`;
+      const qty = parseInt(document.getElementById(`vqty-${varId}`)?.value) || 1;
+      cart[cartKey] = { id: varId, tmpl_id: tmplId, name: varName, price, qty, uom, ref };
+      saveCart();
+      updateCartBadge();
+      const btn = document.getElementById(`vadd-${varId}`);
+      if (btn) { btn.classList.add('in-cart'); btn.textContent = '✓ In offerte'; }
+      // Update de kaartknop
+      const cardBtn = document.getElementById(`add-${tmplId}`);
+      if (cardBtn) { cardBtn.classList.add('in-cart'); cardBtn.innerHTML = '✓ Varianten'; }
+    }
+
+    function changeVQty(cartKey, delta) {
+      const varId = cartKey.replace('v_','');
+      const inp = document.getElementById(`vqty-${varId}`);
+      if (!inp) return;
+      const newQty = Math.max(1, (parseInt(inp.value)||1) + delta);
+      inp.value = newQty;
+      if (cart[cartKey]) { cart[cartKey].qty = newQty; saveCart(); }
+    }
+
+    function setVQty(cartKey, val) {
+      const varId = cartKey.replace('v_','');
+      const q = Math.max(1, parseInt(val)||1);
+      const inp = document.getElementById(`vqty-${varId}`);
+      if (inp) inp.value = q;
+      if (cart[cartKey]) { cart[cartKey].qty = q; saveCart(); }
+    }
+
+    function closeVariantModal(e) {
+      if (e.target === document.getElementById('variant-modal')) closeVariantModalDirect();
+    }
+    function closeVariantModalDirect() {
+      document.getElementById('variant-modal').classList.add('hidden');
+      currentTmplId = null;
+    }
+
     // ── Cart ──────────────────────────────────────────────────────────
     function addToCart(id) {
       const p   = allProducts.find(x => x.id === id);
       if (!p) return;
       const qty = parseInt(document.getElementById(`qty-${id}`)?.value) || 1;
-      const cartPrice = p.lst_price || 0;
+      const cartPrice = p.display_price || 0;
       cart[id]  = { id, name: p.name, price: cartPrice, qty, uom: p.uom_id?.[1]||'', ref: p.default_code||'' };
       saveCart();
       updateCartBadge();
