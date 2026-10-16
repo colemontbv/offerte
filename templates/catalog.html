@@ -253,8 +253,17 @@
 
       // Bepaal parents: categorie waarvan parent_id niet in onze lijst zit (of false)
       const isRoot = c => !c.parent_id || !catMap[c.parent_id[0]];
-      const parents = allCategories.filter(c => usedIds.has(c.id) && isRoot(c))
-                                    .sort((a,b) => a.name.localeCompare(b.name));
+
+      // Voeg ook parent-IDs toe van gebruikte categorieën (ook al staan die parents niet op producten)
+      const referencedParentIds = new Set(
+        allCategories
+          .filter(c => usedIds.has(c.id) && c.parent_id && catMap[c.parent_id[0]])
+          .map(c => c.parent_id[0])
+      );
+      // Root-categorieën = usedIds + referencedParentIds die zelf root zijn
+      const parents = allCategories
+        .filter(c => (usedIds.has(c.id) || referencedParentIds.has(c.id)) && isRoot(c))
+        .sort((a,b) => a.name.localeCompare(b.name));
       // Kinderen van een parent
       const childrenOf = pid => allCategories
         .filter(c => usedIds.has(c.id) && c.parent_id && c.parent_id[0] === pid)
@@ -442,12 +451,16 @@
     }
 
     function renderVariantList(tmplId, variants, tmpl) {
-      const uom = tmpl?.uom_id?.[1] || '';
+      const uom      = tmpl?.uom_id?.[1] || '';
+      const tmplName = tmpl?.name || '';
       // Sla variant-data op zodat onclick-handlers geen JSON in attributen nodig hebben
       variants.forEach(v => {
+        const varLabel = v.variant_label || v.display_name;
+        // Volledige naam = "Product (Variant)" voor op de offerte
+        const fullName = varLabel ? `${tmplName} (${varLabel})` : tmplName;
         variantStore[v.id] = {
           id: v.id, tmpl_id: tmplId,
-          name: v.variant_label || v.display_name,
+          name: fullName,
           price: v.display_price, uom, ref: v.default_code || ''
         };
       });

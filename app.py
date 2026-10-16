@@ -88,6 +88,7 @@ def login():
         session['user_login']   = data.get('login', '').strip().lower()
         session['partner_id']   = partner[0] if isinstance(partner, list) else None
         session['partner_name'] = partner[1] if isinstance(partner, list) and len(partner) > 1 else r.get('name', '')
+        session['pricelist_id'] = None  # wordt ingesteld bij eerste /api/products-aanroep
         return jsonify({'success': True})
 
     except requests.exceptions.ConnectionError:
@@ -118,21 +119,26 @@ def api_products():
     cookies = {'session_id': session['odoo_session']}
     debug = []
 
-    # Zoek Default pricelist (kan falen voor portaalgebruikers — geen blocker)
-    pricelist_id = None
-    try:
-        pl_resp = odoo_rpc(cookies, 'product.pricelist', 'search_read',
-                           [[['name', 'ilike', 'Default']]],
-                           {'fields': ['id', 'name'], 'limit': 1})
-        pl_data = pl_resp.json()
-        pricelists = pl_data.get('result', [])
-        if pricelists:
-            pricelist_id = pricelists[0]['id']
-            debug.append(f'pricelist: {pricelist_id} ({pricelists[0]["name"]})')
-        else:
-            debug.append(f'pricelist: not found — {pl_data.get("error", {}).get("message","?")}')
-    except Exception as e:
-        debug.append(f'pricelist error: {e}')
+    # Zoek Default pricelist (gecached in sessie na eerste keer)
+    pricelist_id = session.get('pricelist_id')
+    if pricelist_id is None:
+        try:
+            pl_resp = odoo_rpc(cookies, 'product.pricelist', 'search_read',
+                               [[['name', 'ilike', 'Default']]],
+                               {'fields': ['id', 'name'], 'limit': 1})
+            pl_data = pl_resp.json()
+            pricelists = pl_data.get('result') or []
+            if pricelists:
+                pricelist_id = pricelists[0]['id']
+                session['pricelist_id'] = pricelist_id
+                debug.append(f'pricelist: {pricelist_id} ({pricelists[0]["name"]})')
+            else:
+                session['pricelist_id'] = False  # niet gevonden, niet opnieuw proberen
+                debug.append(f'pricelist: not found')
+        except Exception as e:
+            debug.append(f'pricelist error: {e}')
+    else:
+        debug.append(f'pricelist: {pricelist_id} (cached)')
 
     ctx = {'pricelist': pricelist_id} if pricelist_id else {}
 
@@ -255,19 +261,11 @@ def product_variants(tmpl_id):
         return jsonify({'error': 'Niet ingelogd'}), 401
     cookies = {'session_id': session['odoo_session']}
     try:
-        # Haal pricelist op voor prijscontext
-        pricelist_id = None
-        pl_resp = odoo_rpc(cookies, 'product.pricelist', 'search_read',
-                           [[['name', 'ilike', 'Default']]],
-                           {'fields': ['id'], 'limit': 1})
-        pl_data = pl_resp.json().get('result') or []
-        if pl_data:
-            pricelist_id = pl_data[0]['id']
+        # Gebruik gecachede pricelist uit sessie
+        pricelist_id = session.get('pricelist_id') or None
 
-        # Haal varianten op
         vctx = {'pricelist': pricelist_id} if pricelist_id else {}
-        vkw = {'fields': ['id', 'display_name', 'lst_price',
-                          'product_template_attribute_value_ids', 'default_code'],
+        vkw = {'fields': ['id', 'display_name', 'lst_price', 'default_code'],
                'limit': 100}
         if vctx:
             vkw['context'] = vctx
@@ -279,23 +277,9 @@ def product_variants(tmpl_id):
             return jsonify({'error': resp_data['error'].get('message', 'Odoo fout')}), 500
         variants = resp_data.get('result') or []
 
-        # Haal pricelist variant-items op voor eventuele fixed prices
-        price_map = {}
-        if pricelist_id and variants:
-            var_ids = [v['id'] for v in variants]
-            items_resp = odoo_rpc(cookies, 'product.pricelist.item', 'search_read',
-                                  [[['pricelist_id', '=', pricelist_id],
-                                    ['compute_price', '=', 'fixed'],
-                                    ['applied_on', '=', '0_product_variant'],
-                                    ['product_id', 'in', var_ids]]],
-                                  {'fields': ['product_id', 'fixed_price'], 'limit': 200})
-            for item in items_resp.json().get('result', []) or []:
-                if item.get('product_id'):
-                    price_map[item['product_id'][0]] = item['fixed_price']
-
         for v in variants:
-            v['display_price'] = price_map.get(v['id'], v.get('lst_price', 0))
-            # Bouw een korte variantnaam (enkel het variante deel, zonder templatenaam)
+            v['display_price'] = v.get('lst_price') or 0
+            # Korte variantnaam = deel tussen haakjes in display_name
             full = v.get('display_name', '')
             if '(' in full and full.endswith(')'):
                 v['variant_label'] = full[full.index('(')+1:-1]
