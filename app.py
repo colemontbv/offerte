@@ -117,15 +117,41 @@ def api_products():
         return jsonify({'error': 'Niet ingelogd'}), 401
     cookies = {'session_id': session['odoo_session']}
     try:
+        # Zoek Default pricelist op voor correcte prijzen
+        pl_resp = odoo_rpc(cookies, 'product.pricelist', 'search_read',
+                           [[['name', 'ilike', 'Default']]],
+                           {'fields': ['id', 'name'], 'limit': 1})
+        pricelists = pl_resp.json().get('result', [])
+        pricelist_id = pricelists[0]['id'] if pricelists else None
+        ctx = {'pricelist': pricelist_id} if pricelist_id else {}
+
+        # Haal webcategorieën op
+        cat_resp = odoo_rpc(cookies, 'product.public.category', 'search_read',
+                            [[]],
+                            {'fields': ['id', 'name', 'complete_name'], 'limit': 500})
+        cats = {c['id']: c for c in cat_resp.json().get('result', [])}
+
+        # Haal producten op met pricelist context
         resp = odoo_rpc(cookies, 'product.template', 'search_read',
                         [[['is_published', '=', True],
                           ['sale_ok', '=', True]]],
-                        {'fields': ['id', 'name', 'description_sale', 'list_price',
-                                    'lst_price', 'categ_id', 'uom_id', 'default_code'],
-                         'order': 'categ_id asc, name asc',
+                        {'fields': ['id', 'name', 'description_sale', 'lst_price',
+                                    'public_categ_ids', 'uom_id', 'default_code'],
+                         'context': ctx,
+                         'order': 'name asc',
                          'limit': 1000})
-        result = resp.json().get('result', [])
-        return jsonify({'products': result})
+        products = resp.json().get('result', [])
+
+        # Koppel categorienamen aan elk product
+        for p in products:
+            p['web_categories'] = [
+                {'id': cid, 'name': cats[cid]['name'],
+                 'complete_name': cats[cid].get('complete_name', cats[cid]['name'])}
+                for cid in p.get('public_categ_ids', []) if cid in cats
+            ]
+
+        return jsonify({'products': products,
+                        'categories': sorted(cats.values(), key=lambda c: c.get('complete_name',''))})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

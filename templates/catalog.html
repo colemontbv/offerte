@@ -159,11 +159,15 @@
     let imageCache   = {};
 
     // ── Laden ─────────────────────────────────────────────────────────
+    let allCategories = [];
+
     async function loadProducts() {
       try {
         const r = await fetch('/api/products');
         const d = await r.json();
-        allProducts = d.products || [];
+        if (d.error) throw new Error(d.error);
+        allProducts   = d.products   || [];
+        allCategories = d.categories || [];
         buildCatFilter();
         renderGrid();
         updateCartBadge();
@@ -174,17 +178,13 @@
     }
 
     function buildCatFilter() {
-      const cats = new Map();
-      allProducts.forEach(p => {
-        const cid = p.categ_id ? p.categ_id[0] : 0;
-        const cn  = p.categ_id ? p.categ_id[1] : 'Overige';
-        if (!cats.has(cid)) cats.set(cid, cn);
-      });
-      const sorted = [...cats.entries()].sort((a,b) => a[1].localeCompare(b[1],'nl'));
+      // Gebruik enkel categorieën die effectief op producten staan
+      const usedIds = new Set(allProducts.flatMap(p => (p.web_categories||[]).map(c => c.id)));
+      const visible = allCategories.filter(c => usedIds.has(c.id));
       const wrap = document.getElementById('cat-filter');
       wrap.innerHTML = `<button class="cat-btn active" onclick="setActiveCat(null, this)">Alle</button>`
-        + sorted.map(([id,name]) =>
-            `<button class="cat-btn" onclick="setActiveCat(${id}, this)">${escHtml(name)}</button>`
+        + visible.map(c =>
+            `<button class="cat-btn" onclick="setActiveCat(${c.id}, this)">${escHtml(c.name)}</button>`
           ).join('');
     }
 
@@ -200,7 +200,7 @@
     function renderGrid() {
       const q = document.getElementById('search-input').value.toLowerCase();
       let list = allProducts;
-      if (activeCat !== null) list = list.filter(p => p.categ_id && p.categ_id[0] === activeCat);
+      if (activeCat !== null) list = list.filter(p => (p.web_categories||[]).some(c => c.id === activeCat));
       if (q) list = list.filter(p => (p.name||'').toLowerCase().includes(q)
                                   || (p.default_code||'').toLowerCase().includes(q));
       const grid = document.getElementById('product-grid');
@@ -215,7 +215,7 @@
     function buildCard(p) {
       const inCart = !!cart[p.id];
       const qty    = cart[p.id]?.qty || 1;
-      const rawPrice = (p.lst_price && p.lst_price > 0) ? p.lst_price : p.list_price;
+      const rawPrice = p.lst_price || 0;
       const price  = formatEuro(rawPrice);
       const uom    = p.uom_id ? p.uom_id[1] : '';
       const ref    = p.default_code ? `<div class="prod-ref">${escHtml(p.default_code)}</div>` : '';
@@ -283,7 +283,7 @@
       const p   = allProducts.find(x => x.id === id);
       if (!p) return;
       const qty = parseInt(document.getElementById(`qty-${id}`)?.value) || 1;
-      const cartPrice = (p.lst_price && p.lst_price > 0) ? p.lst_price : p.list_price;
+      const cartPrice = p.lst_price || 0;
       cart[id]  = { id, name: p.name, price: cartPrice, qty, uom: p.uom_id?.[1]||'', ref: p.default_code||'' };
       saveCart();
       updateCartBadge();
