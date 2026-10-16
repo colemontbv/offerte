@@ -215,7 +215,8 @@
     function buildCard(p) {
       const inCart = !!cart[p.id];
       const qty    = cart[p.id]?.qty || 1;
-      const price  = formatEuro(p.list_price);
+      const rawPrice = (p.website_price && p.website_price > 0) ? p.website_price : p.list_price;
+      const price  = formatEuro(rawPrice);
       const uom    = p.uom_id ? p.uom_id[1] : '';
       const ref    = p.default_code ? `<div class="prod-ref">${escHtml(p.default_code)}</div>` : '';
       const desc   = p.description_sale
@@ -243,35 +244,38 @@
         </div>`;
     }
 
-    // Lazy-load productafbeelding bij hover/klik
-    const imgObserver = typeof IntersectionObserver !== 'undefined'
-      ? new IntersectionObserver(entries => {
-          entries.forEach(e => { if (e.isIntersecting) loadImageEl(e.target); });
-        }, {rootMargin: '200px'})
-      : null;
-
-    function loadImage(id) {
-      const wrap = document.getElementById(`img-wrap-${id}`);
-      if (wrap) loadImageEl(wrap, id);
-    }
-
-    async function loadImageEl(wrap, id) {
-      if (!id) id = parseInt(wrap.closest('[data-id]')?.dataset.id);
+    async function loadImageEl(el) {
+      const id = parseInt(el.closest('[data-id]')?.dataset.id);
       if (!id || imageCache[id]) return;
       imageCache[id] = true;
       try {
         const r = await fetch(`/api/product/${id}/image`);
-        if (r.status === 204) return;
+        if (r.status === 204) { el.innerHTML = ''; return; }
         const blob = await r.blob();
         const url  = URL.createObjectURL(blob);
-        wrap.outerHTML = `<img class="prod-img" src="${url}" alt="" id="img-wrap-${id}">`;
+        const img = document.createElement('img');
+        img.className = 'prod-img';
+        img.src = url;
+        img.alt = '';
+        el.replaceWith(img);
       } catch(_) {}
     }
 
-    // Laad afbeeldingen na renderen
+    // Laad zichtbare beelden direct; rest via IntersectionObserver
     function observeImages() {
-      if (!imgObserver) return;
-      document.querySelectorAll('.prod-img-placeholder').forEach(el => imgObserver.observe(el));
+      const placeholders = [...document.querySelectorAll('.prod-img-placeholder')];
+      if (!placeholders.length) return;
+
+      // Laad alle placeholders in batches van 4, met 50ms pauze
+      let i = 0;
+      function nextBatch() {
+        const batch = placeholders.slice(i, i + 4);
+        if (!batch.length) return;
+        batch.forEach(el => loadImageEl(el));
+        i += 4;
+        if (i < placeholders.length) setTimeout(nextBatch, 50);
+      }
+      nextBatch();
     }
 
     // ── Cart ──────────────────────────────────────────────────────────
@@ -279,7 +283,8 @@
       const p   = allProducts.find(x => x.id === id);
       if (!p) return;
       const qty = parseInt(document.getElementById(`qty-${id}`)?.value) || 1;
-      cart[id]  = { id, name: p.name, price: p.list_price, qty, uom: p.uom_id?.[1]||'', ref: p.default_code||'' };
+      const cartPrice = (p.website_price && p.website_price > 0) ? p.website_price : p.list_price;
+      cart[id]  = { id, name: p.name, price: cartPrice, qty, uom: p.uom_id?.[1]||'', ref: p.default_code||'' };
       saveCart();
       updateCartBadge();
       const btn = document.getElementById(`add-${id}`);
